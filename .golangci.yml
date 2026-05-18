@@ -17,3 +17,8 @@ linters:
       enabled-tags:
         - diagnostic
         - performance
+      settings:
+        rangeValCopy:
+          sizeThreshold: 256
+        hugeParam:
+          sizeThreshold: 256
