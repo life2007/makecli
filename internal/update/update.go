@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 net/http、archive/tar、compress/gzip、encoding/json、github.com/Masterminds/semver/v3
- * [OUTPUT]: 对外提供 CheckLatest / ListReleases / NormalizeTag / Apply 函数、Release / Asset 结构体
+ * [OUTPUT]: 对外提供 CheckLatest / ListReleases / NormalizeTag / GetRelease / Apply 函数、Release / Asset 结构体
  * [POS]: internal/update 的核心引擎，被 cmd/update.go 消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -112,6 +112,32 @@ func NormalizeTag(input string) (string, error) {
 		return "", fmt.Errorf("invalid version %q: %w", input, err)
 	}
 	return "v" + stripped, nil
+}
+
+// GetRelease 按 tag 拉取指定 release。tag 必须是规范化形式（带 v 前缀）。
+//   404 → "release {tag} not found"
+//   其他非 200 → "failed to fetch release {tag}: HTTP {code}"
+func GetRelease(tag string) (*Release, error) {
+	url := fmt.Sprintf("%s/repos/qfeius/makecli/releases/tags/%s", apiBaseURL, tag)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch release %s: %w", tag, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("release %s not found", tag)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch release %s: HTTP %d", tag, resp.StatusCode)
+	}
+
+	var release Release
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("failed to parse release %s: %w", tag, err)
+	}
+	return &release, nil
 }
 
 // Apply 下载指定 release 的 asset 并替换当前二进制

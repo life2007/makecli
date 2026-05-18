@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -257,5 +258,74 @@ func TestNormalizeTag(t *testing.T) {
 				t.Errorf("NormalizeTag(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// -----------------------------------------------------------------------
+// GetRelease 测试
+// -----------------------------------------------------------------------
+
+func TestGetRelease_Success(t *testing.T) {
+	release := Release{
+		TagName: "v0.2.0",
+		Name:    "v0.2.0",
+		Assets:  []Asset{{Name: "makecli_0.2.0_linux_amd64.tar.gz"}},
+	}
+
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(release)
+	}))
+	defer server.Close()
+
+	oldURL := apiBaseURL
+	apiBaseURL = server.URL
+	defer func() { apiBaseURL = oldURL }()
+
+	got, err := GetRelease("v0.2.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.TagName != "v0.2.0" {
+		t.Errorf("got tag %q, want v0.2.0", got.TagName)
+	}
+	if gotPath != "/repos/qfeius/makecli/releases/tags/v0.2.0" {
+		t.Errorf("unexpected path %q", gotPath)
+	}
+}
+
+func TestGetRelease_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	oldURL := apiBaseURL
+	apiBaseURL = server.URL
+	defer func() { apiBaseURL = oldURL }()
+
+	_, err := GetRelease("v9.9.9")
+	if err == nil {
+		t.Fatal("expected error for 404")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestGetRelease_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	oldURL := apiBaseURL
+	apiBaseURL = server.URL
+	defer func() { apiBaseURL = oldURL }()
+
+	_, err := GetRelease("v0.2.0")
+	if err == nil {
+		t.Fatal("expected error for HTTP 500")
 	}
 }
