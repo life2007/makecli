@@ -56,42 +56,29 @@ var apiBaseURL = "https://api.github.com"
 func CheckLatest(currentVersion string) (*Release, bool, error) {
 	url := apiBaseURL + "/repos/qfeius/makecli/releases/latest"
 
-	resp, err := http.Get(url)
+	var release Release
+	status, err := fetchJSON(url, &release)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to check for updates: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, false, fmt.Errorf("failed to check for updates: HTTP %d", resp.StatusCode)
+	if status != http.StatusOK {
+		return nil, false, fmt.Errorf("failed to check for updates: HTTP %d", status)
 	}
 
-	var release Release
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, false, fmt.Errorf("failed to parse release info: %w", err)
-	}
-
-	newer := isNewer(currentVersion, release.TagName)
-	return &release, newer, nil
+	return &release, isNewer(currentVersion, release.TagName), nil
 }
 
 // ListReleases 拉取最近 limit 条 release（按 created_at 倒序）
 func ListReleases(limit int) ([]Release, error) {
 	url := fmt.Sprintf("%s/repos/qfeius/makecli/releases?per_page=%d", apiBaseURL, limit)
 
-	resp, err := http.Get(url)
+	var releases []Release
+	status, err := fetchJSON(url, &releases)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list releases: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list releases: HTTP %d", resp.StatusCode)
-	}
-
-	var releases []Release
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-		return nil, fmt.Errorf("failed to parse releases: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("failed to list releases: HTTP %d", status)
 	}
 
 	return releases, nil
@@ -120,24 +107,39 @@ func NormalizeTag(input string) (string, error) {
 func GetRelease(tag string) (*Release, error) {
 	url := fmt.Sprintf("%s/repos/qfeius/makecli/releases/tags/%s", apiBaseURL, tag)
 
-	resp, err := http.Get(url)
+	var release Release
+	status, err := fetchJSON(url, &release)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch release %s: %w", tag, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
+	if status == http.StatusNotFound {
 		return nil, fmt.Errorf("release %s not found", tag)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch release %s: HTTP %d", tag, resp.StatusCode)
-	}
-
-	var release Release
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("failed to parse release %s: %w", tag, err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch release %s: HTTP %d", tag, status)
 	}
 	return &release, nil
+}
+
+// fetchJSON 发送 GET 请求并将响应体解码到 target。
+// 返回 HTTP 状态码（供调用方做语义化错误映射，如 404→"not found"）。
+// 网络错误返回 (0, err)；非 200 状态返回 (code, nil)，body 不解码；
+// 200 但 JSON 解析失败返回 (200, err)。
+func fetchJSON(url string, target any) (int, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, nil
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+		return resp.StatusCode, err
+	}
+	return resp.StatusCode, nil
 }
 
 // Apply 下载指定 release 的 asset 并替换当前二进制
