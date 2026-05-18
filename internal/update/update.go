@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 net/http、archive/tar、compress/gzip、encoding/json、github.com/Masterminds/semver/v3
- * [OUTPUT]: 对外提供 CheckLatest / Apply 函数、Release / Asset 结构体
+ * [OUTPUT]: 对外提供 CheckLatest / ListReleases / Apply 函数、Release / Asset 结构体
  * [POS]: internal/update 的核心引擎，被 cmd/update.go 消费
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -26,10 +26,14 @@ import (
 // 数据结构
 // -----------------------------------------------------------------------
 
-// Release 表示 GitHub Releases API 返回的最新版本
+// Release 表示 GitHub Releases API 返回的版本
 type Release struct {
-	TagName string  `json:"tag_name"`
-	Assets  []Asset `json:"assets"`
+	TagName     string  `json:"tag_name"`
+	Name        string  `json:"name"`
+	PublishedAt string  `json:"published_at"`
+	Prerelease  bool    `json:"prerelease"`
+	HTMLURL     string  `json:"html_url"`
+	Assets      []Asset `json:"assets"`
 }
 
 // Asset 表示 release 中的单个可下载文件
@@ -69,6 +73,28 @@ func CheckLatest(currentVersion string) (*Release, bool, error) {
 
 	newer := isNewer(currentVersion, release.TagName)
 	return &release, newer, nil
+}
+
+// ListReleases 拉取最近 limit 条 release（按 created_at 倒序）
+func ListReleases(limit int) ([]Release, error) {
+	url := fmt.Sprintf("%s/repos/qfeius/makecli/releases?per_page=%d", apiBaseURL, limit)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list releases: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list releases: HTTP %d", resp.StatusCode)
+	}
+
+	var releases []Release
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("failed to parse releases: %w", err)
+	}
+
+	return releases, nil
 }
 
 // Apply 下载指定 release 的 asset 并替换当前二进制
@@ -278,6 +304,13 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// SetAPIBaseURLForTest 替换 GitHub API 基础 URL，返回原值用于恢复。仅供测试使用。
+func SetAPIBaseURLForTest(url string) string {
+	old := apiBaseURL
+	apiBaseURL = url
+	return old
 }
 
 // isNewer 使用 semver 比较版本，DEV 版本视为始终可更新
