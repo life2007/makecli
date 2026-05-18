@@ -25,7 +25,7 @@ func newVersionListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List historical releases from GitHub",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVersionList(cmd, limit, output)
+			return runVersionList(limit, output)
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "number of releases to fetch (1-100)")
@@ -33,7 +33,7 @@ func newVersionListCmd() *cobra.Command {
 	return cmd
 }
 
-func runVersionList(_ *cobra.Command, limit int, output string) error {
+func runVersionList(limit int, output string) error {
 	if limit < 1 || limit > 100 {
 		return fmt.Errorf("limit must be between 1 and 100")
 	}

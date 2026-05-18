@@ -43,7 +43,7 @@ func TestRunVersionList_Table(t *testing.T) {
 	defer cleanup()
 
 	out := captureStdout(t, func() {
-		if err := runVersionList(nil, 20, "table"); err != nil {
+		if err := runVersionList(20, "table"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -67,7 +67,7 @@ func TestRunVersionList_TableMarksCurrent(t *testing.T) {
 	defer cleanup()
 
 	out := captureStdout(t, func() {
-		if err := runVersionList(nil, 20, "table"); err != nil {
+		if err := runVersionList(20, "table"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -97,7 +97,7 @@ func TestRunVersionList_JSON(t *testing.T) {
 	defer cleanup()
 
 	out := captureStdout(t, func() {
-		if err := runVersionList(nil, 20, "json"); err != nil {
+		if err := runVersionList(20, "json"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -119,7 +119,7 @@ func TestRunVersionList_Empty(t *testing.T) {
 	defer cleanup()
 
 	out := captureStdout(t, func() {
-		if err := runVersionList(nil, 20, "table"); err != nil {
+		if err := runVersionList(20, "table"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -131,14 +131,14 @@ func TestRunVersionList_Empty(t *testing.T) {
 
 func TestRunVersionList_InvalidLimit(t *testing.T) {
 	for _, lim := range []int{0, -1, 101, 1000} {
-		if err := runVersionList(nil, lim, "table"); err == nil {
+		if err := runVersionList(lim, "table"); err == nil {
 			t.Errorf("expected error for limit=%d", lim)
 		}
 	}
 }
 
 func TestRunVersionList_InvalidOutput(t *testing.T) {
-	if err := runVersionList(nil, 20, "xml"); err == nil {
+	if err := runVersionList(20, "xml"); err == nil {
 		t.Fatal("expected error for output=xml")
 	}
 }
@@ -147,7 +147,49 @@ func TestRunVersionList_APIError(t *testing.T) {
 	cleanup := mockReleasesServer(t, http.StatusInternalServerError, nil)
 	defer cleanup()
 
-	if err := runVersionList(nil, 20, "table"); err == nil {
+	if err := runVersionList(20, "table"); err == nil {
 		t.Fatal("expected error for HTTP 500")
+	}
+}
+
+func TestRunVersionList_TableEmptyNameFallsBackToTag(t *testing.T) {
+	cleanup := mockReleasesServer(t, 0, []update.Release{
+		{TagName: "v1.2.3", Name: "", PublishedAt: "2026-05-10T08:12:00Z", HTMLURL: "https://example.com/r/1.2.3"},
+	})
+	defer cleanup()
+
+	out := captureStdout(t, func() {
+		if err := runVersionList(20, "table"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	// 当 Name 为空时，应使用 TagName 填充 NAME 列。
+	// v1.2.3 同时是 VERSION 与 NAME 列的值；统计该 token 出现次数应 >= 2。
+	if strings.Count(out, "v1.2.3") < 2 {
+		t.Errorf("expected v1.2.3 to appear in both VERSION and NAME columns when Name is empty, got:\n%s", out)
+	}
+}
+
+func TestRunVersionList_TableDevVersionNoMarker(t *testing.T) {
+	oldVersion := build.Version
+	build.Version = "DEV"
+	defer func() { build.Version = oldVersion }()
+
+	cleanup := mockReleasesServer(t, 0, []update.Release{
+		{TagName: "v1.2.3", Name: "fix", PublishedAt: "2026-05-10T08:12:00Z", HTMLURL: "https://example.com/r/1.2.3"},
+		{TagName: "v1.2.2", Name: "perf", PublishedAt: "2026-05-01T03:55:11Z", HTMLURL: "https://example.com/r/1.2.2"},
+	})
+	defer cleanup()
+
+	out := captureStdout(t, func() {
+		if err := runVersionList(20, "table"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	// DEV 版本不应在任何行打 * 标记
+	if strings.Contains(out, "*") {
+		t.Errorf("DEV build.Version should not produce any * marker, got:\n%s", out)
 	}
 }
