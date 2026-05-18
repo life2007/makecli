@@ -95,7 +95,8 @@ func listRelations(client *api.Client, appKey string, page, size int, output str
 	}
 
 	rows := make([][]string, len(relations))
-	for i, r := range relations {
+	for i := range relations {
+		r := &relations[i]
 		version, _ := r.Meta["version"].(string)
 		from := fmt.Sprintf("%s(%s)", r.Properties.From.EntityKey, r.Properties.From.Cardinality)
 		to := fmt.Sprintf("%s(%s)", r.Properties.To.EntityKey, r.Properties.To.Cardinality)
