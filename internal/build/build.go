@@ -16,10 +16,30 @@ var Version = "DEV"
 var Date = ""
 
 func init() {
-	// 若未通过 ldflags 注入，尝试从 go module 构建信息中读取版本
-	if Version == "DEV" {
-		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "(devel)" {
-			Version = info.Main.Version
-		}
+	// 若未通过 ldflags 注入，尝试从 go module 构建信息中兜底
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
 	}
+	if Version == "DEV" && info.Main.Version != "(devel)" {
+		Version = info.Main.Version
+	}
+	if Date == "" {
+		Date = deriveDate(info.Settings)
+	}
+}
+
+// deriveDate 从构建信息的 vcs.time 派生日期，截取为 YYYY-MM-DD（best-effort）。
+// 无 vcs.time 或值过短时分别返回空 / 原值，绝不越界。
+func deriveDate(settings []debug.BuildSetting) string {
+	for _, s := range settings {
+		if s.Key != "vcs.time" {
+			continue
+		}
+		if len(s.Value) >= 10 {
+			return s.Value[:10]
+		}
+		return s.Value
+	}
+	return ""
 }
