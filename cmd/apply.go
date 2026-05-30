@@ -10,6 +10,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,7 +110,7 @@ func loadManifestsFromFile(path string) ([]ResourceManifest, error) {
 	for {
 		var m ResourceManifest
 		if err := decoder.Decode(&m); err != nil {
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return nil, fmt.Errorf("解析 YAML 失败: %w", err)
