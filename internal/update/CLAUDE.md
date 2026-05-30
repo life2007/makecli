@@ -6,6 +6,7 @@ update.go:      自更新引擎，CheckLatest 查询 GitHub latest release、Lis
 checksum.go:    供应链完整性闸门，挡在 download 与 replaceBinary 之间；fetchChecksums 拉取 release 的 checksums.txt（短超时 checksumsClient，资产缺失即 fail-closed）、verifyChecksum 纯函数比对归档 SHA-256 与 GoReleaser 格式（"<hex><两空格><文件名>"，大小写不敏感）；任何缺失/不符均返回 error，绝不替换运行中的二进制
 update_test.go: 覆盖 isNewer / assetName / findAsset / CheckLatest / ListReleases / NormalizeTag / GetRelease / CompareVersions 的单元测试，用 httptest 隔离网络
 checksum_test.go: 覆盖 verifyChecksum（正确/错误/文件名缺失/空内容）、fetchChecksums（存在/资产缺失/非200）、Apply 端到端 fail-closed（缺 checksums 资产 / 文件名缺失 / hash 不符均不替换二进制），用 httptest + t.TempDir + 内存构造 tar.gz
+platform_test.go: 覆盖 assetNameFor 跨平台格式（windows=zip）、extractBinary 从 zip 提取 makecli.exe、downloadClient 用 ResponseHeaderTimeout 而非硬 Timeout
 install_test.go: 覆盖 installBinary 的安装/stage 清理/回滚成功/回滚失败恢复提示，通过 renameFile seam 注入失败，exe 用 t.TempDir 隔离
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

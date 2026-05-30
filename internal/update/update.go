@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 net/http、time、archive/tar、compress/gzip、encoding/json、github.com/Masterminds/semver/v3；依赖同包 checksum.go 的 fetchChecksums/verifyChecksum 做完整性校验
+ * [INPUT]: 依赖 net/http、time、archive/tar、archive/zip、compress/gzip、encoding/json、github.com/Masterminds/semver/v3；依赖同包 checksum.go 的 fetchChecksums/verifyChecksum 做完整性校验
  * [OUTPUT]: 对外提供 CheckLatest / ListReleases / NormalizeTag / GetRelease / CompareVersions / Apply 函数、Release / Asset 结构体
  * [POS]: internal/update 的核心引擎，被 cmd/update.go 消费；Apply 在替换二进制前强制 SHA-256 校验（fail-closed）
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -9,6 +9,7 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -52,6 +53,12 @@ var apiBaseURL = "https://api.github.com"
 // metaClient 用于元数据 JSON 请求（latest / list / tag），带超时以约束后台刷新。
 // 注意：二进制下载（download）不复用此 client，避免大文件被超时打断。
 var metaClient = &http.Client{Timeout: 10 * time.Second}
+
+// downloadClient 用于大归档下载：不设一刀切 Timeout（会截断慢但有进展的大文件），
+// 仅用 ResponseHeaderTimeout 约束「服务端迟迟不响应头」，避免下载在卡死时无限挂起。
+var downloadClient = &http.Client{
+	Transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second},
+}
 
 // renameFile 抽出 os.Rename 作为 seam，便于测试注入失败以验证 installBinary 的回滚路径。
 var renameFile = os.Rename
@@ -212,9 +219,19 @@ func Apply(release *Release) error {
 // 内部实现
 // -----------------------------------------------------------------------
 
-// assetName 拼接当前平台对应的 asset 文件名
+// assetName 拼接当前运行平台对应的 asset 文件名
 func assetName(version string) string {
-	return fmt.Sprintf("makecli_%s_%s_%s.tar.gz", version, runtime.GOOS, runtime.GOARCH)
+	return assetNameFor(version, runtime.GOOS, runtime.GOARCH)
+}
+
+// assetNameFor 按指定平台拼接 asset 文件名。归档格式与 .goreleaser.yml 对齐：
+// windows 用 .zip，其余用 .tar.gz。goos 注入便于跨平台单测。
+func assetNameFor(version, goos, goarch string) string {
+	ext := "tar.gz"
+	if goos == "windows" {
+		ext = "zip"
+	}
+	return fmt.Sprintf("makecli_%s_%s_%s.%s", version, goos, goarch, ext)
 }
 
 // findAsset 从 assets 列表中匹配当前平台
@@ -230,7 +247,7 @@ func findAsset(assets []Asset, version string) (*Asset, error) {
 
 // download 下载 URL 内容到临时文件，返回临时文件路径
 func download(url string) (string, error) {
-	resp, err := http.Get(url)
+	resp, err := downloadClient.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to download: %w", err)
 	}
@@ -240,7 +257,7 @@ func download(url string) (string, error) {
 		return "", fmt.Errorf("failed to download: HTTP %d", resp.StatusCode)
 	}
 
-	tmp, err := os.CreateTemp("", "makecli-update-*.tar.gz")
+	tmp, err := os.CreateTemp("", "makecli-update-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -254,8 +271,43 @@ func download(url string) (string, error) {
 	return tmp.Name(), nil
 }
 
-// extractBinary 从 tar.gz 归档中提取 makecli 二进制到临时文件
+// extractBinary 从归档中提取 makecli 二进制到临时文件，按扩展名分派：
+// .zip（Windows）走 extractFromZip，其余走 extractFromTarGz。
 func extractBinary(archivePath string) (string, error) {
+	if strings.HasSuffix(archivePath, ".zip") {
+		return extractFromZip(archivePath)
+	}
+	return extractFromTarGz(archivePath)
+}
+
+// isMakecliBinary 判定归档内某条目是否为目标二进制（忽略目录前缀与 .exe 后缀）。
+func isMakecliBinary(name string) bool {
+	base := filepath.Base(name)
+	return base == "makecli" || base == "makecli.exe"
+}
+
+// writeBinaryTemp 把 r 落到一个可执行临时文件，返回路径。
+func writeBinaryTemp(r io.Reader) (string, error) {
+	tmp, err := os.CreateTemp("", "makecli-bin-*")
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(tmp, r); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", fmt.Errorf("failed to extract binary: %w", err)
+	}
+	_ = tmp.Close()
+
+	if err := os.Chmod(tmp.Name(), 0755); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", err
+	}
+	return tmp.Name(), nil
+}
+
+// extractFromTarGz 从 tar.gz 归档中提取 makecli 二进制
+func extractFromTarGz(archivePath string) (string, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return "", err
@@ -277,31 +329,34 @@ func extractBinary(archivePath string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to read archive: %w", err)
 		}
-
-		// 匹配 "makecli" 文件（忽略目录前缀）
-		base := filepath.Base(hdr.Name)
-		if base != "makecli" || hdr.Typeflag != tar.TypeReg {
+		if hdr.Typeflag != tar.TypeReg || !isMakecliBinary(hdr.Name) {
 			continue
 		}
+		return writeBinaryTemp(tr)
+	}
 
-		tmp, err := os.CreateTemp("", "makecli-bin-*")
+	return "", fmt.Errorf("makecli binary not found in archive")
+}
+
+// extractFromZip 从 zip 归档（Windows）中提取 makecli 二进制
+func extractFromZip(archivePath string) (string, error) {
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open zip: %w", err)
+	}
+	defer func() { _ = zr.Close() }()
+
+	for _, file := range zr.File {
+		if file.FileInfo().IsDir() || !isMakecliBinary(file.Name) {
+			continue
+		}
+		rc, err := file.Open()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("failed to read archive: %w", err)
 		}
-
-		if _, err := io.Copy(tmp, tr); err != nil {
-			_ = tmp.Close()
-			_ = os.Remove(tmp.Name())
-			return "", fmt.Errorf("failed to extract binary: %w", err)
-		}
-		_ = tmp.Close()
-
-		if err := os.Chmod(tmp.Name(), 0755); err != nil {
-			_ = os.Remove(tmp.Name())
-			return "", err
-		}
-
-		return tmp.Name(), nil
+		path, err := writeBinaryTemp(rc)
+		_ = rc.Close()
+		return path, err
 	}
 
 	return "", fmt.Errorf("makecli binary not found in archive")
