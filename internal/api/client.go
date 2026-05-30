@@ -89,7 +89,7 @@ func (c *Client) CreateApp(key, name string, properties map[string]any) error {
 		"key":        key,
 		"name":       name,
 		"type":       "Make.App",
-		"meta":       map[string]any{"version": "1.0.0"},
+		"meta":       map[string]any{"version": metaVersion},
 		"properties": properties,
 	}
 	return c.post("MakeService.CreateResource", "/meta/v1/app", body)
@@ -188,20 +188,29 @@ type Relation struct {
 	Properties RelationProperties `json:"properties"`
 }
 
+// metaVersion 是所有写操作（Create/Update）默认附带的 DSL 元数据版本号。
+const metaVersion = "1.0.0"
+
+// writeResource 是 Entity/Relation 的 Create/Update 共享写入原语：四者唯一的差异
+// 仅在 action（Create/Update verb）、resType、path、properties，其余 body 结构完全一致。
+// 抽此一处收口，消除四个逐字重复的函数体（含 meta 版本号这类「配置当代码写 N 遍」的味道）。
+func (c *Client) writeResource(action, resType, path, key, name, appKey string, properties any) error {
+	body := map[string]any{
+		"key":        key,
+		"name":       name,
+		"type":       resType,
+		"appKey":     appKey,
+		"meta":       map[string]any{"version": metaVersion},
+		"properties": properties,
+	}
+	return c.post(action, path, body)
+}
+
 // CreateEntity 调用 MakeService.CreateResource 在指定 App 下创建 Entity
 // key 是 Entity 标识符（英数下划线），name 是展示名（必填）；appKey 引用所属 App
 func (c *Client) CreateEntity(key, name, appKey string, fields []Field) error {
-	body := map[string]any{
-		"key":    key,
-		"name":   name,
-		"type":   "Make.Entity",
-		"appKey": appKey,
-		"meta":   map[string]any{"version": "1.0.0"},
-		"properties": map[string]any{
-			"fields": fields,
-		},
-	}
-	return c.post("MakeService.CreateResource", "/meta/v1/entity", body)
+	return c.writeResource("MakeService.CreateResource", "Make.Entity", "/meta/v1/entity",
+		key, name, appKey, map[string]any{"fields": fields})
 }
 
 // ListEntities 调用 MakeService.ListResources 获取指定 App 下全部 Entity
@@ -271,17 +280,8 @@ func (c *Client) GetApp(key string) (*App, error) {
 
 // UpdateEntity 调用 MakeService.UpdateResource 更新指定 Entity（按 key 定位）
 func (c *Client) UpdateEntity(key, name, appKey string, fields []Field) error {
-	body := map[string]any{
-		"key":    key,
-		"name":   name,
-		"type":   "Make.Entity",
-		"appKey": appKey,
-		"meta":   map[string]any{"version": "1.0.0"},
-		"properties": map[string]any{
-			"fields": fields,
-		},
-	}
-	return c.post("MakeService.UpdateResource", "/meta/v1/entity", body)
+	return c.writeResource("MakeService.UpdateResource", "Make.Entity", "/meta/v1/entity",
+		key, name, appKey, map[string]any{"fields": fields})
 }
 
 // DeleteEntity 调用 MakeService.DeleteResource 删除指定 Entity（按 key 定位）
@@ -296,35 +296,16 @@ func (c *Client) DeleteEntity(key, appKey string) error {
 
 // CreateRelation 调用 MakeService.CreateResource 在指定 App 下创建 Relation
 // key 是 Relation 标识符，name 是展示名（必填）；appKey 引用所属 App
+// props 经 json tag from/to 直接序列化，与旧版逐字段展开等价
 func (c *Client) CreateRelation(key, name, appKey string, props RelationProperties) error {
-	body := map[string]any{
-		"key":    key,
-		"name":   name,
-		"type":   "Make.Relation",
-		"appKey": appKey,
-		"meta":   map[string]any{"version": "1.0.0"},
-		"properties": map[string]any{
-			"from": props.From,
-			"to":   props.To,
-		},
-	}
-	return c.post("MakeService.CreateResource", "/meta/v1/relation", body)
+	return c.writeResource("MakeService.CreateResource", "Make.Relation", "/meta/v1/relation",
+		key, name, appKey, props)
 }
 
 // UpdateRelation 调用 MakeService.UpdateResource 更新指定 Relation（按 key 定位）
 func (c *Client) UpdateRelation(key, name, appKey string, props RelationProperties) error {
-	body := map[string]any{
-		"key":    key,
-		"name":   name,
-		"type":   "Make.Relation",
-		"appKey": appKey,
-		"meta":   map[string]any{"version": "1.0.0"},
-		"properties": map[string]any{
-			"from": props.From,
-			"to":   props.To,
-		},
-	}
-	return c.post("MakeService.UpdateResource", "/meta/v1/relation", body)
+	return c.writeResource("MakeService.UpdateResource", "Make.Relation", "/meta/v1/relation",
+		key, name, appKey, props)
 }
 
 // ListRelations 调用 MakeService.ListResources 获取指定 App 下全部 Relation
