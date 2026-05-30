@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 github.com/spf13/cobra、github.com/spf13/pflag
- * [OUTPUT]: 对外提供 Execute 函数、rootCmd 根命令、全局变量 Profile / ServerURL / DebugMode
+ * [INPUT]: 依赖 github.com/spf13/cobra、github.com/spf13/pflag、os、internal/notifier
+ * [OUTPUT]: 对外提供 Execute 函数、rootCmd 根命令、全局变量 Profile / ServerURL / DebugMode；包内 commandName 解析器
  * [POS]: cmd 模块的入口，挂载 version / configure / app / entity / relation / record / apply / diff / update / schema / integration 子命令；定义全局 --profile / --server-url / --debug 三个 PersistentFlag
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -8,6 +8,9 @@
 package cmd
 
 import (
+	"os"
+
+	"github.com/qfeius/makecli/internal/notifier"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -94,5 +97,21 @@ func Execute(version, buildDate string) error {
 	rootCmd.AddCommand(newDiffCmd())
 	rootCmd.AddCommand(newSchemaCmd())
 	rootCmd.AddCommand(newIntegrationCmd())
-	return rootCmd.Execute()
+	n := notifier.Start()
+	err := rootCmd.Execute()
+	n.Finish(commandName(rootCmd, os.Args[1:]))
+	return err
+}
+
+// commandName 解析本次实际调用的顶级子命令名（version/update/app...）。
+// 无子命令或解析失败时返回 ""（由判定链视为跳过）。
+func commandName(root *cobra.Command, args []string) string {
+	cmd, _, err := root.Find(args)
+	if err != nil || cmd == nil || cmd == root {
+		return ""
+	}
+	for cmd.Parent() != nil && cmd.Parent() != root {
+		cmd = cmd.Parent()
+	}
+	return cmd.Name()
 }

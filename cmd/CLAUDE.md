@@ -18,7 +18,8 @@
 - 单测需要切换 profile 时用 `setProfile(t, "name")`（stdout_test.go），t.Cleanup 自动还原
 
 ## 成员清单
-root.go:             根命令入口，挂载所有子命令（含 schema），对外暴露 Execute(version, date)；定义全局 PersistentFlag --profile / --server-url / --debug，分别绑定全局变量 Profile / ServerURL / DebugMode
+root.go:             根命令入口，挂载所有子命令（含 schema），对外暴露 Execute(version, date)；定义全局 PersistentFlag --profile / --server-url / --debug，分别绑定全局变量 Profile / ServerURL / DebugMode；钩入 notifier.Start/Finish 生命周期；包内 commandName 解析顶级命令名
+root_test.go:        覆盖 commandName 顶级命令解析的单元测试（version/version list/update/app create/空 args/未知命令）
 version.go:          version 子命令组，默认 Run 打印当前版本（参考 GitHub CLI 模式），挂载 list 子命令
 version_test.go:     覆盖 formatVersion / changelogURL 的纯函数测试
 version_list.go:     version list 子命令，调 internal/update.ListReleases 拉取 GitHub 最近 N 条 release，tablewriter 输出 CURRENT/VERSION/PUBLISHED/URL（JSON 输出保留 name 字段）；CURRENT 列对比 build.Version 标记当前安装版本；支持 --limit（默认20，1-100）/ --output（table|json）
