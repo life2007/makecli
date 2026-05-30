@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 internal/api 包内的 Client（包内白盒），encoding/json、net/http、net/http/httptest
- * [OUTPUT]: 覆盖 Client.CreateApp / ListApps / DeleteApp / WithHeaders / WithDebug 的单元测试
+ * [INPUT]: 依赖 internal/api 包内的 Client（包内白盒），encoding/json、errors、net/http、net/http/httptest、testing
+ * [OUTPUT]: 覆盖 Client.CreateApp / ListApps / DeleteApp / WithHeaders / WithDebug / GetApp / GetEntity / GetRelation（含 ErrNotFound 语义）的单元测试
  * [POS]: internal/api client.go 的配套测试，用 httptest 隔离网络
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -9,6 +9,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -164,7 +165,7 @@ func TestWithHeaders(t *testing.T) {
 	defer srv.Close()
 
 	headers := map[string]string{
-		"X-Tenant-ID":  "tenant-abc",
+		"X-Tenant-ID":   "tenant-abc",
 		"X-Operator-ID": "op-123",
 	}
 	client := New(srv.URL, "test-token", WithHeaders(headers))
@@ -183,4 +184,164 @@ func TestWithDebugOption(t *testing.T) {
 	if err := client.CreateApp("test", "测试", nil); err != nil {
 		t.Fatalf("CreateApp with debug: %v", err)
 	}
+}
+
+// ---------------------------------- Get* + ErrNotFound 语义 ----------------------------------
+
+// newGetServer 启动一个原样回放给定 JSON body / HTTP status 的测试服务器，
+// 用于精确控制 GetResource 的响应，验证 not-found 与真实错误的区分。
+func newGetServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+}
+
+func TestGetAppNotFoundSemantics(t *testing.T) {
+	t.Run("not-found business code returns ErrNotFound", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":404,"msg":"app not found","data":{}}`)
+		defer srv.Close()
+
+		_, err := New(srv.URL, "test-token").GetApp("ghost")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("200 with empty data returns ErrNotFound", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":200,"msg":"ok","data":{}}`)
+		defer srv.Close()
+
+		_, err := New(srv.URL, "test-token").GetApp("ghost")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for empty data, got %v", err)
+		}
+	})
+
+	t.Run("exists returns no error", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":200,"msg":"ok","data":{"key":"myapp","name":"我的应用","type":"Make.App"}}`)
+		defer srv.Close()
+
+		app, err := New(srv.URL, "test-token").GetApp("myapp")
+		if err != nil {
+			t.Fatalf("GetApp: %v", err)
+		}
+		if app.Key != "myapp" {
+			t.Fatalf("expected key myapp, got %q", app.Key)
+		}
+	})
+
+	t.Run("500 business code is NOT ErrNotFound", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":500,"msg":"internal error","data":{}}`)
+		defer srv.Close()
+
+		_, err := New(srv.URL, "test-token").GetApp("myapp")
+		if err == nil {
+			t.Fatal("expected error on 500 business code")
+		}
+		if errors.Is(err, ErrNotFound) {
+			t.Fatalf("500 must not map to ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("transport error is NOT ErrNotFound", func(t *testing.T) {
+		// 指向一个已关闭的 server，触发真实传输错误
+		srv := newGetServer(t, http.StatusOK, `{"code":200}`)
+		url := srv.URL
+		srv.Close()
+
+		_, err := New(url, "test-token").GetApp("myapp")
+		if err == nil {
+			t.Fatal("expected transport error")
+		}
+		if errors.Is(err, ErrNotFound) {
+			t.Fatalf("transport error must not map to ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("decode error is NOT ErrNotFound", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `not json`)
+		defer srv.Close()
+
+		_, err := New(srv.URL, "test-token").GetApp("myapp")
+		if err == nil {
+			t.Fatal("expected decode error")
+		}
+		if errors.Is(err, ErrNotFound) {
+			t.Fatalf("decode error must not map to ErrNotFound, got %v", err)
+		}
+	})
+}
+
+func TestGetEntityNotFoundSemantics(t *testing.T) {
+	t.Run("not-found returns ErrNotFound", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":404,"msg":"entity not found","data":{}}`)
+		defer srv.Close()
+
+		_, err := New(srv.URL, "test-token").GetEntity("myapp", "ghost")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("500 is NOT ErrNotFound", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":500,"msg":"boom","data":{}}`)
+		defer srv.Close()
+
+		_, err := New(srv.URL, "test-token").GetEntity("myapp", "task")
+		if err == nil || errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected non-ErrNotFound error, got %v", err)
+		}
+	})
+
+	t.Run("exists returns no error", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":200,"msg":"ok","data":{"key":"task","name":"任务","appKey":"myapp"}}`)
+		defer srv.Close()
+
+		ent, err := New(srv.URL, "test-token").GetEntity("myapp", "task")
+		if err != nil {
+			t.Fatalf("GetEntity: %v", err)
+		}
+		if ent.Key != "task" {
+			t.Fatalf("expected key task, got %q", ent.Key)
+		}
+	})
+}
+
+func TestGetRelationNotFoundSemantics(t *testing.T) {
+	t.Run("not-found returns ErrNotFound", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":404,"msg":"relation not found","data":{}}`)
+		defer srv.Close()
+
+		_, err := New(srv.URL, "test-token").GetRelation("myapp", "ghost")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("transport error is NOT ErrNotFound", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":200}`)
+		url := srv.URL
+		srv.Close()
+
+		_, err := New(url, "test-token").GetRelation("myapp", "rel")
+		if err == nil || errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected non-ErrNotFound transport error, got %v", err)
+		}
+	})
+
+	t.Run("exists returns no error", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":200,"msg":"ok","data":{"key":"project_has_tasks","name":"关联","appKey":"myapp"}}`)
+		defer srv.Close()
+
+		rel, err := New(srv.URL, "test-token").GetRelation("myapp", "project_has_tasks")
+		if err != nil {
+			t.Fatalf("GetRelation: %v", err)
+		}
+		if rel.Key != "project_has_tasks" {
+			t.Fatalf("expected key project_has_tasks, got %q", rel.Key)
+		}
+	})
 }

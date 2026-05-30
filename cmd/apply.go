@@ -1,13 +1,14 @@
 /**
- * [INPUT]: 依赖 cmd/client（newClientFromProfile）、cmd/app（validResourceKey）、internal/api（Client/CreateApp/CreateEntity/GetApp/GetEntity/UpdateEntity/GetRelation/CreateRelation/UpdateRelation/Field/RelationProperties/RelationEnd）、fmt、os、path/filepath、strings、gopkg.in/yaml.v3、github.com/spf13/cobra
+ * [INPUT]: 依赖 cmd/client（newClientFromProfile）、cmd/app（validResourceKey）、internal/api（Client/ErrNotFound/CreateApp/CreateEntity/GetApp/GetEntity/UpdateEntity/GetRelation/CreateRelation/UpdateRelation/Field/RelationProperties/RelationEnd）、errors、fmt、os、path/filepath、strings、gopkg.in/yaml.v3、github.com/spf13/cobra
  * [OUTPUT]: 对外提供 newApplyCmd 函数、ResourceManifest 类型（Key/Name/Type/AppKey/Meta/Properties）
- * [POS]: cmd 模块的顶层 apply 命令，从 YAML 文件/目录批量应用资源（create-or-update 语义），按 Key 标识资源，Name 仅为展示名
+ * [POS]: cmd 模块的顶层 apply 命令，从 YAML 文件/目录批量应用资源（create-or-update 语义），按 Key 标识资源，Name 仅为展示名；存在性判定依赖 api.ErrNotFound，瞬时/传输错误不会被误判为"不存在"
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -223,14 +224,18 @@ func applyResources(resources []ResourceManifest, client *api.Client) error {
 
 // applyApp 从清单应用 App：不存在则创建，已存在则跳过（App 无 update API）
 // manifest.Key 是英文标识符，manifest.Name 是展示名；name 缺省时回退用 key
+// Get 出现非 not-found 错误时直接上抛，绝不把瞬时故障误判为"不存在"而误建
 func applyApp(manifest ResourceManifest, client *api.Client) (string, error) {
 	if err := validResourceKey(manifest.Key); err != nil {
 		return "", err
 	}
 
-	existing, err := client.GetApp(manifest.Key)
-	if err == nil && existing.Key != "" {
-		return "", nil // App 无 update API，静默跳过
+	_, err := client.GetApp(manifest.Key)
+	if err == nil {
+		return "", nil // 已存在；App 无 update API，静默跳过
+	}
+	if !errors.Is(err, api.ErrNotFound) {
+		return "", err // 瞬时/传输/非 not-found 业务错误，上抛不创建
 	}
 
 	displayName := manifest.Name
@@ -280,9 +285,12 @@ func applyEntity(manifest ResourceManifest, client *api.Client) (string, error) 
 		displayName = manifest.Key
 	}
 
-	existing, err := client.GetEntity(manifest.AppKey, manifest.Key)
-	if err == nil && existing.Key != "" {
+	_, err := client.GetEntity(manifest.AppKey, manifest.Key)
+	if err == nil {
 		return "updated", client.UpdateEntity(manifest.Key, displayName, manifest.AppKey, fields)
+	}
+	if !errors.Is(err, api.ErrNotFound) {
+		return "", err // 瞬时/传输/非 not-found 业务错误，上抛不创建（避免把 update 降级成 create）
 	}
 
 	return "created", client.CreateEntity(manifest.Key, displayName, manifest.AppKey, fields)
@@ -304,9 +312,12 @@ func applyRelation(manifest ResourceManifest, client *api.Client) (string, error
 		displayName = manifest.Key
 	}
 
-	existing, err := client.GetRelation(manifest.AppKey, manifest.Key)
-	if err == nil && existing.Key != "" {
+	_, err = client.GetRelation(manifest.AppKey, manifest.Key)
+	if err == nil {
 		return "updated", client.UpdateRelation(manifest.Key, displayName, manifest.AppKey, props)
+	}
+	if !errors.Is(err, api.ErrNotFound) {
+		return "", err // 瞬时/传输/非 not-found 业务错误，上抛不创建（避免把 update 降级成 create）
 	}
 
 	return "created", client.CreateRelation(manifest.Key, displayName, manifest.AppKey, props)

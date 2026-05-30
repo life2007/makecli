@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 cmd 包内函数（包内白盒）、internal/config、encoding/json、net/http、net/http/httptest、os、path/filepath、strings、testing
- * [OUTPUT]: 覆盖 apply 子命令核心逻辑的单元测试（App/Entity/Relation）
+ * [INPUT]: 依赖 cmd 包内函数（包内白盒）、internal/config、encoding/json、net/http、net/http/httptest、os、path/filepath、strconv、strings、testing
+ * [OUTPUT]: 覆盖 apply 子命令核心逻辑的单元测试（App/Entity/Relation，含 ErrNotFound 幂等性：瞬时错误不创建/not-found 创建/已存在更新）
  * [POS]: cmd 模块顶层 apply 命令的配套测试，用 httptest 隔离网络、临时文件测试 YAML 解析
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -466,6 +467,190 @@ properties:
 	})
 }
 
+// ---------------------------------- create-or-update 幂等性（ErrNotFound 语义） ----------------------------------
+
+// TestRunAppApplyDoesNotCreateOnTransientGetError 锁定核心缺陷修复：
+// 当 Get 因瞬时/传输/非 not-found 业务错误失败时，apply 必须上抛错误且绝不调用 Create，
+// 杜绝把"已存在的 App"误建成重复键，或把 Entity/Relation 的 update 静默降级为 create。
+func TestRunAppApplyDoesNotCreateOnTransientGetError(t *testing.T) {
+	cases := []struct {
+		name    string
+		yaml    string
+		getCode int // GetResource 返回的业务码（非 200/非 404）
+	}{
+		{
+			name:    "app get 500 does not create",
+			getCode: 500,
+			yaml: `key: myapp
+name: 我的应用
+type: Make.App
+meta:
+  version: 1.0.0
+properties:
+  description: demo
+`,
+		},
+		{
+			name:    "entity get 500 does not create",
+			getCode: 500,
+			yaml: `key: task
+name: 任务
+type: Make.Entity
+appKey: myapp
+meta:
+  version: 1.0.0
+properties:
+  fields:
+    - key: title
+      name: 标题
+      type: Make.Field.Text
+      meta:
+        version: 1.0.0
+      properties: {}
+`,
+		},
+		{
+			name:    "relation get 500 does not create",
+			getCode: 500,
+			yaml: `key: project_has_tasks
+name: 项目任务关联
+type: Make.Relation
+appKey: myapp
+meta:
+  version: 1.0.0
+properties:
+  from:
+    entityKey: project
+    cardinality: one
+  to:
+    entityKey: task
+    cardinality: many
+`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			createHits := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				target := r.Header.Get("X-Make-Target")
+				if target == "MakeService.GetResource" {
+					// 瞬时故障：非 200 且非 404 的业务码
+					_, _ = w.Write([]byte(`{"code":` + itoaForApply(tc.getCode) + `,"msg":"transient failure","data":{}}`))
+					return
+				}
+				if target == "MakeService.CreateResource" {
+					createHits++
+				}
+				_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{}}`))
+			}))
+			defer srv.Close()
+			t.Setenv("HOME", t.TempDir())
+			saveDefaultTokenForApply(t)
+			ServerURL = srv.URL
+			testDir := t.TempDir()
+
+			yamlFile := writeYAMLFileForApply(t, testDir, "res.yaml", tc.yaml)
+
+			err := runAppApply(yamlFile)
+			if err == nil {
+				t.Fatal("expected error to propagate from transient Get failure")
+			}
+			if createHits != 0 {
+				t.Fatalf("Create must NOT be called on transient Get error, got %d hits", createHits)
+			}
+		})
+	}
+}
+
+// TestRunAppApplyCreatesOnNotFound 验证 Get 返回 not-found 业务码（404）时走 Create 分支。
+func TestRunAppApplyCreatesOnNotFound(t *testing.T) {
+	createHits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		target := r.Header.Get("X-Make-Target")
+		if target == "MakeService.GetResource" {
+			_, _ = w.Write([]byte(`{"code":404,"msg":"not found","data":{}}`))
+			return
+		}
+		if target == "MakeService.CreateResource" {
+			createHits++
+		}
+		_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{}}`))
+	}))
+	defer srv.Close()
+	t.Setenv("HOME", t.TempDir())
+	saveDefaultTokenForApply(t)
+	ServerURL = srv.URL
+	testDir := t.TempDir()
+
+	yamlFile := writeYAMLFileForApply(t, testDir, "app.yaml", `key: myapp
+name: 我的应用
+type: Make.App
+meta:
+  version: 1.0.0
+properties:
+  description: demo
+`)
+
+	if err := runAppApply(yamlFile); err != nil {
+		t.Fatalf("runAppApply on not-found: %v", err)
+	}
+	if createHits != 1 {
+		t.Fatalf("expected exactly 1 Create on not-found, got %d", createHits)
+	}
+}
+
+// TestRunAppApplyUpdatesOnExisting 验证 Get 返回存在资源时 Entity 走 Update（而非 Create）。
+func TestRunAppApplyUpdatesOnExisting(t *testing.T) {
+	updateHits := 0
+	createHits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Header.Get("X-Make-Target") {
+		case "MakeService.GetResource":
+			_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{"key":"task","name":"任务","appKey":"myapp"}}`))
+		case "MakeService.UpdateResource":
+			updateHits++
+			_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{}}`))
+		case "MakeService.CreateResource":
+			createHits++
+			_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{}}`))
+		default:
+			_, _ = w.Write([]byte(`{"code":200,"msg":"ok","data":{}}`))
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("HOME", t.TempDir())
+	saveDefaultTokenForApply(t)
+	ServerURL = srv.URL
+	testDir := t.TempDir()
+
+	yamlFile := writeYAMLFileForApply(t, testDir, "entity.yaml", `key: task
+name: 任务
+type: Make.Entity
+appKey: myapp
+meta:
+  version: 1.0.0
+properties:
+  fields:
+    - key: title
+      name: 标题
+      type: Make.Field.Text
+      meta:
+        version: 1.0.0
+      properties: {}
+`)
+
+	if err := runAppApply(yamlFile); err != nil {
+		t.Fatalf("runAppApply on existing: %v", err)
+	}
+	if updateHits != 1 || createHits != 0 {
+		t.Fatalf("expected 1 Update + 0 Create on existing, got update=%d create=%d", updateHits, createHits)
+	}
+}
+
 func TestRunAppApplyFailsWithoutRecognizedYAMLFiles(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	saveDefaultTokenForApply(t)
@@ -668,4 +853,9 @@ func writeYAMLFileForApply(t *testing.T, dir, name, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// itoaForApply 把业务码拼进 JSON body（避免为单测引入 strconv import）
+func itoaForApply(n int) string {
+	return strconv.Itoa(n)
 }

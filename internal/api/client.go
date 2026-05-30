@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 bytes、encoding/json、fmt、net/http、time
- * [OUTPUT]: 对外提供 Client 类型、Option / WithDebug / WithHeaders 功能选项、New 构造函数、App / Field / Entity / EntityProperties / RelationEnd / RelationProperties / Relation / Schema 类型、CreateApp(key, name, properties) / ListApps(page, size, filter) / DeleteApp(key) / GetApp(key) / CreateEntity(key, name, appKey, fields) / ListEntities(appKey, page, size, filter) / GetEntity(appKey, key) / UpdateEntity / DeleteEntity / CreateRelation(key, name, appKey, props) / UpdateRelation / ListRelations(appKey, ...) / GetRelation(appKey, key) / DeleteRelation / GetSchema(appKey) 方法。资源以 Key 为唯一标识符（英数下划线），Name 为用户可见展示名（支持中文）
+ * [INPUT]: 依赖 bytes、encoding/json、errors、fmt、net/http、time
+ * [OUTPUT]: 对外提供 Client 类型、ErrNotFound 哨兵错误、Option / WithDebug / WithHeaders 功能选项、New 构造函数、App / Field / Entity / EntityProperties / RelationEnd / RelationProperties / Relation / Schema 类型、CreateApp(key, name, properties) / ListApps(page, size, filter) / DeleteApp(key) / GetApp(key) / CreateEntity(key, name, appKey, fields) / ListEntities(appKey, page, size, filter) / GetEntity(appKey, key) / UpdateEntity / DeleteEntity / CreateRelation(key, name, appKey, props) / UpdateRelation / ListRelations(appKey, ...) / GetRelation(appKey, key) / DeleteRelation / GetSchema(appKey) 方法。资源以 Key 为唯一标识符（英数下划线），Name 为用户可见展示名（支持中文）。Get* 方法在资源确实不存在时返回 ErrNotFound（可用 errors.Is 判定），其余错误（传输/非 not-found 业务码/解码）原样返回
  * [POS]: internal/api 的核心，封装 Make Meta Service 的 HTTP 调用
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -10,11 +10,23 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"time"
 )
+
+// ---------------------------------- 哨兵错误 ----------------------------------
+
+// ErrNotFound 表示资源确实不存在（区别于传输错误 / 非 not-found 业务错误 / 解码失败）。
+// Get* 方法用 %w 包裹返回它，调用方用 errors.Is(err, ErrNotFound) 判定。
+// 它把"不存在"这个语义从模糊的 (err == nil && Key == "") 启发式里解放出来，
+// 让 apply 的 create-or-update 决策不再把瞬时故障误判为"不存在"。
+var ErrNotFound = errors.New("资源不存在")
+
+// notFoundCode 是 Meta Server 表示资源不存在的业务错误码
+const notFoundCode = 404
 
 // ---------------------------------- 客户端 ----------------------------------
 
@@ -96,9 +108,9 @@ func (c *Client) ListApps(page, size int, filter []map[string]any) ([]App, int, 
 	}
 
 	var result struct {
-		Code    int    `json:"code"`
-		Message string `json:"msg"`
-		Data    []App  `json:"data"`
+		Code       int    `json:"code"`
+		Message    string `json:"msg"`
+		Data       []App  `json:"data"`
 		Pagination struct {
 			Total int `json:"total"`
 		} `json:"pagination"`
@@ -205,9 +217,9 @@ func (c *Client) ListEntities(appKey string, page, size int, filter []map[string
 		reqBody["filter"] = filter
 	}
 	var result struct {
-		Code    int      `json:"code"`
-		Message string   `json:"msg"`
-		Data    []Entity `json:"data"`
+		Code       int      `json:"code"`
+		Message    string   `json:"msg"`
+		Data       []Entity `json:"data"`
 		Pagination struct {
 			Total int `json:"total"`
 		} `json:"pagination"`
@@ -222,6 +234,7 @@ func (c *Client) ListEntities(appKey string, page, size int, filter []map[string
 }
 
 // GetEntity 调用 MakeService.GetResource 获取指定 Entity 的详细信息（按 key 定位）
+// 资源不存在时返回 ErrNotFound；传输/非 not-found 业务错误原样返回
 func (c *Client) GetEntity(appKey, key string) (*Entity, error) {
 	reqBody := map[string]any{"appKey": appKey, "key": key}
 	var result struct {
@@ -232,13 +245,14 @@ func (c *Client) GetEntity(appKey, key string) (*Entity, error) {
 	if err := c.do("MakeService.GetResource", "/meta/v1/entity", reqBody, &result); err != nil {
 		return nil, err
 	}
-	if result.Code != 200 {
-		return nil, fmt.Errorf("API 错误 [%d]: %s", result.Code, result.Message)
+	if err := checkGetResult(result.Code, result.Message, result.Data.Key); err != nil {
+		return nil, err
 	}
 	return &result.Data, nil
 }
 
 // GetApp 调用 MakeService.GetResource 获取指定 App（按 key 定位）
+// 资源不存在时返回 ErrNotFound；传输/非 not-found 业务错误原样返回
 func (c *Client) GetApp(key string) (*App, error) {
 	reqBody := map[string]any{"key": key}
 	var result struct {
@@ -249,8 +263,8 @@ func (c *Client) GetApp(key string) (*App, error) {
 	if err := c.do("MakeService.GetResource", "/meta/v1/app", reqBody, &result); err != nil {
 		return nil, err
 	}
-	if result.Code != 200 {
-		return nil, fmt.Errorf("API 错误 [%d]: %s", result.Code, result.Message)
+	if err := checkGetResult(result.Code, result.Message, result.Data.Key); err != nil {
+		return nil, err
 	}
 	return &result.Data, nil
 }
@@ -326,9 +340,9 @@ func (c *Client) ListRelations(appKey string, page, size int, filter []map[strin
 		reqBody["filter"] = filter
 	}
 	var result struct {
-		Code    int        `json:"code"`
-		Message string     `json:"msg"`
-		Data    []Relation `json:"data"`
+		Code       int        `json:"code"`
+		Message    string     `json:"msg"`
+		Data       []Relation `json:"data"`
 		Pagination struct {
 			Total int `json:"total"`
 		} `json:"pagination"`
@@ -343,6 +357,7 @@ func (c *Client) ListRelations(appKey string, page, size int, filter []map[strin
 }
 
 // GetRelation 调用 MakeService.GetResource 获取指定 Relation 的详细信息（按 key 定位）
+// 资源不存在时返回 ErrNotFound；传输/非 not-found 业务错误原样返回
 func (c *Client) GetRelation(appKey, key string) (*Relation, error) {
 	reqBody := map[string]any{"appKey": appKey, "key": key}
 	var result struct {
@@ -353,10 +368,31 @@ func (c *Client) GetRelation(appKey, key string) (*Relation, error) {
 	if err := c.do("MakeService.GetResource", "/meta/v1/relation", reqBody, &result); err != nil {
 		return nil, err
 	}
-	if result.Code != 200 {
-		return nil, fmt.Errorf("API 错误 [%d]: %s", result.Code, result.Message)
+	if err := checkGetResult(result.Code, result.Message, result.Data.Key); err != nil {
+		return nil, err
 	}
 	return &result.Data, nil
+}
+
+// checkGetResult 把 GetResource 的业务码/数据收敛成统一的"存在/不存在/出错"三态：
+//   - code == 404（not-found 业务码）        → ErrNotFound
+//   - code == 200 且 data.key 为空（软空响应） → ErrNotFound
+//   - code != 200 且非 404                    → 原样业务错误（不映射为 not-found）
+//   - code == 200 且 data.key 非空            → nil（存在）
+//
+// 软空响应分支保留了服务端"200 + 空 data"表示不存在的现实约定，
+// 让"不存在"语义被 ErrNotFound 这一个哨兵收口，消除调用方的 Key != "" 启发式。
+func checkGetResult(code int, message, dataKey string) error {
+	if code == notFoundCode {
+		return fmt.Errorf("%w: %s", ErrNotFound, message)
+	}
+	if code != 200 {
+		return fmt.Errorf("API 错误 [%d]: %s", code, message)
+	}
+	if dataKey == "" {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteRelation 调用 MakeService.DeleteResource 删除指定 Relation（按 key 定位）
