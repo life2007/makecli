@@ -142,7 +142,7 @@ func loadManifestsFromDir(dir string) ([]ResourceManifest, error) {
 			continue
 		}
 		ext := filepath.Ext(entry.Name())
-		if !isRecognizedManifestExtension(ext) {
+		if !slices.Contains(recognizedManifestExtensions, ext) {
 			continue
 		}
 		matchedFiles++
@@ -160,15 +160,6 @@ func loadManifestsFromDir(dir string) ([]ResourceManifest, error) {
 		)
 	}
 	return manifests, nil
-}
-
-func isRecognizedManifestExtension(ext string) bool {
-	for _, candidate := range recognizedManifestExtensions {
-		if ext == candidate {
-			return true
-		}
-	}
-	return false
 }
 
 // ---------------------------------- 资源应用 ----------------------------------
