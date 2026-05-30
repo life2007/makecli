@@ -41,10 +41,16 @@ func notifierEnabled(envVal string, cfgVal *bool) bool {
 	return true
 }
 
-// isReleaseVersion 判定 current 是否为合法发布版本（DEV / 非法 semver → false）
+// isReleaseVersion 判定 current 是否为正式发布版本（无 prerelease 段）。
+// DEV / 非法 semver → false；带 prerelease 的版本（含 git-describe 伪版本
+// 如 v0.3.0-16-ga4765c1，以及 go install 的模块伪版本）一律视为开发态 → false，
+// 否则会因 semver「prerelease 低于正式版」把降级误报成升级。
 func isReleaseVersion(current string) bool {
-	_, err := semver.NewVersion(strings.TrimPrefix(current, "v"))
-	return err == nil
+	v, err := semver.NewVersion(strings.TrimPrefix(current, "v"))
+	if err != nil {
+		return false
+	}
+	return v.Prerelease() == ""
 }
 
 // shouldNotify 在「已启用」前提下，判定是否真的要打印提示。任一条件不满足即 false。

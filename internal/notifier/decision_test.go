@@ -41,6 +41,23 @@ func TestNotifierEnabled(t *testing.T) {
 	}
 }
 
+func TestIsReleaseVersion(t *testing.T) {
+	cases := map[string]bool{
+		"1.0.0":             true,
+		"v2.3.4":            true,
+		"DEV":               false,
+		"":                  false,
+		"garbage":           false,
+		"0.3.0-16-ga4765c1": false, // git-describe 开发态构建
+		"1.0.0-beta.1":      false, // prerelease
+	}
+	for in, want := range cases {
+		if got := isReleaseVersion(in); got != want {
+			t.Errorf("isReleaseVersion(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 func TestShouldNotify(t *testing.T) {
 	newer := cacheData{LatestVersion: "v2.0.0"}
 	same := cacheData{LatestVersion: "v1.0.0"}
@@ -64,6 +81,7 @@ func TestShouldNotify(t *testing.T) {
 		{"empty cmd", "1.0.0", "", true, "", newer, false},
 		{"no cache", "1.0.0", "app", true, "", empty, false},
 		{"same version", "1.0.0", "app", true, "", same, false},
+		{"dev build vs base release (no spurious upgrade)", "0.3.0-16-ga4765c1", "app", true, "", cacheData{LatestVersion: "v0.3.0"}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
