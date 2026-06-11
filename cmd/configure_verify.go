@@ -107,7 +107,7 @@ func runConfigureVerify(output string) (*verifyResult, error) {
 	}
 
 	client := api.New(server, p.AccessToken, api.WithHeaders(headers))
-	_, _, err = client.ListApps(1, 1, nil)
+	_, _, err = client.ListApps(1, 1, "")
 	if err != nil {
 		result.Message = fmt.Sprintf("token invalid (%s)", err)
 		outputVerifyResult(&result, output)

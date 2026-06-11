@@ -38,32 +38,42 @@ func newAppListCmd() *cobra.Command {
 	return cmd
 }
 
-// parseFilter 解析 "key=value,key2=value2" 格式的过滤表达式
-// 逗号分隔的每组 key=value 构成 OR 关系（数组中独立对象）
+// parseFilter 把 "key=value,key2=value2" 过滤语法翻译为 CEL 表达式文本
+// 逗号分隔的每组 key=value 之间是 OR（||）关系
 // 不同字段使用不同的匹配语义：
-//   - key: 等值匹配 (=)
-//   - name, description: 模糊匹配 (contains)
-func parseFilter(expr string) ([]map[string]any, error) {
+//   - key:               等值匹配  key == 'value'
+//   - name, description: 模糊匹配  name.contains('value')
+//
+// 返回空串表示无筛选；服务端将其包成 Expression{expression} 解析。
+func parseFilter(expr string) (string, error) {
 	if expr == "" {
-		return nil, nil
+		return "", nil
 	}
-	var filters []map[string]any
+	var terms []string
 	for _, part := range strings.Split(expr, ",") {
 		kv := strings.SplitN(part, "=", 2)
 		if len(kv) != 2 || kv[0] == "" || kv[1] == "" {
-			return nil, fmt.Errorf("invalid filter expression %q, expected key=value", part)
+			return "", fmt.Errorf("invalid filter expression %q, expected key=value", part)
 		}
 		field, val := strings.TrimSpace(kv[0]), strings.TrimSpace(kv[1])
 		switch field {
 		case "key":
-			filters = append(filters, map[string]any{field: map[string]any{"=": val}})
+			terms = append(terms, fmt.Sprintf("%s == %s", field, celString(val)))
 		case "name", "description":
-			filters = append(filters, map[string]any{field: map[string]any{"contains": val}})
+			terms = append(terms, fmt.Sprintf("%s.contains(%s)", field, celString(val)))
 		default:
-			return nil, fmt.Errorf("unsupported filter field %q", field)
+			return "", fmt.Errorf("unsupported filter field %q", field)
 		}
 	}
-	return filters, nil
+	return strings.Join(terms, " || "), nil
+}
+
+// celString 将任意字符串转义为 CEL 单引号字符串字面量
+// 仅需处理反斜杠与单引号；先转义反斜杠以免二次转义已注入的转义符
+func celString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	return "'" + s + "'"
 }
 
 func runAppList(page, size int, output, filterExpr string) error {

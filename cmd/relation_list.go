@@ -71,7 +71,7 @@ func runRelationList(appKey, relationKey string, page, size int, output, filterE
 	return listRelations(client, appKey, page, size, output, filter)
 }
 
-func listRelations(client *api.Client, appKey string, page, size int, output string, filter []map[string]any) error {
+func listRelations(client *api.Client, appKey string, page, size int, output string, filter string) error {
 	relations, total, err := client.ListRelations(appKey, page, size, filter)
 	if err != nil {
 		return err

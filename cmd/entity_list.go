@@ -71,7 +71,7 @@ func runEntityList(appKey, entityKey string, page, size int, output, filterExpr 
 	return listEntities(client, appKey, page, size, output, filter)
 }
 
-func listEntities(client *api.Client, appKey string, page, size int, output string, filter []map[string]any) error {
+func listEntities(client *api.Client, appKey string, page, size int, output string, filter string) error {
 	entities, total, err := client.ListEntities(appKey, page, size, filter)
 	if err != nil {
 		return err

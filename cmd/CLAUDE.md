@@ -33,7 +33,7 @@ stdout_test.go:      测试基础设施，提供 captureStdout 劫持 stdout 的
 app.go:              app 命令组，挂载 app 相关子命令；提供 loadAppManifestFromFile 共享 helper（从 YAML 加载唯一 Make.App 资源）
 app_create.go:       app create 子命令，位置参数为 App key（英文标识符），--name 为展示名（必填，支持中文），--description 描述；支持 -f YAML 文件模式；CreateApp(key, displayName, properties) 透传
 app_create_test.go:  覆盖 runAppCreate / runAppCreateFromFile 的单元测试（成功/无凭证/API错误/未知profile/文件模式），用 httptest 隔离网络；含 validResourceKey 通用 key 校验测试（长度 2-20，不可以下划线开头）
-app_list.go:         app list 子命令，调用 MakeService.ListResources 分页列出 org 下全部 App，输出列 KEY/NAME/VERSION/CREATED AT；支持 --profile / --server / --page / --size / --filter flags；parseFilter 解析 "key=value" 过滤表达式：key 字段走等值匹配，name/description 走 contains 模糊匹配
+app_list.go:         app list 子命令，调用 MakeService.ListResources 分页列出 org 下全部 App，输出列 KEY/NAME/VERSION/CREATED AT；支持 --profile / --server / --page / --size / --filter flags；parseFilter 把 "key=value" 过滤语法翻译为 CEL 表达式文本（key 走等值 `key == 'v'`，name/description 走 `field.contains('v')`，逗号 = `||`），celString 转义单引号字面量；服务端按 Expression{expression} 解析（见 AgenticDSL/Design/ExpressionDesign.md）
 app_list_test.go:    覆盖 runAppList / parseFilter 的单元测试（成功/空列表/分页JSON/过滤请求/非法过滤/无凭证/API错误/非法页码），用 httptest 隔离网络
 app_init.go:         app init 子命令，在目标目录创建 CLAUDE.md 和 AGENTS.md（内容来自 agents 包 embed.FS）；folder 可选，默认当前目录，不存在则自动创建
 app_init_test.go:    覆盖 runAppInit 的单元测试（创建文件/创建目录/内容匹配 embed/重复检测）

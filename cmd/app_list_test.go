@@ -157,22 +157,13 @@ func TestRunAppList(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode request: %v", err)
 			}
-			arr, ok := req["filter"].([]any)
+			obj, ok := req["filter"].(map[string]any)
 			if !ok {
-				t.Fatalf("expected filter to be array, got %T", req["filter"])
+				t.Fatalf("expected filter to be Expression object, got %T", req["filter"])
 			}
-			if len(arr) != 2 {
-				t.Fatalf("expected 2 filter elements (OR), got %d", len(arr))
-			}
-			first, _ := arr[0].(map[string]any)
-			nameFilter, _ := first["name"].(map[string]any)
-			if nameFilter["contains"] != "todo" {
-				t.Errorf("expected name contains=todo, got %v", nameFilter["contains"])
-			}
-			second, _ := arr[1].(map[string]any)
-			keyFilter, _ := second["key"].(map[string]any)
-			if keyFilter["="] != "todo" {
-				t.Errorf("expected key ==todo, got %v", keyFilter["="])
+			want := "name.contains('todo') || key == 'todo'"
+			if obj["expression"] != want {
+				t.Errorf("expected expression %q, got %v", want, obj["expression"])
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"code": 200, "message": "success",
@@ -204,46 +195,53 @@ func TestRunAppList(t *testing.T) {
 }
 
 func TestParseFilter(t *testing.T) {
-	t.Run("empty returns nil", func(t *testing.T) {
+	t.Run("empty returns empty string", func(t *testing.T) {
 		f, err := parseFilter("")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if f != nil {
-			t.Fatalf("expected nil, got %v", f)
+		if f != "" {
+			t.Fatalf("expected empty string, got %q", f)
 		}
 	})
 
-	t.Run("single field becomes array with one element", func(t *testing.T) {
+	t.Run("name field becomes contains CEL", func(t *testing.T) {
 		f, err := parseFilter("name=项目")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(f) != 1 {
-			t.Fatalf("expected 1 element, got %d", len(f))
-		}
-		nameObj, ok := f[0]["name"].(map[string]any)
-		if !ok {
-			t.Fatalf("expected name to be map, got %T", f[0]["name"])
-		}
-		if nameObj["contains"] != "项目" {
-			t.Errorf("expected contains=项目, got %v", nameObj["contains"])
+		if f != "name.contains('项目')" {
+			t.Errorf("expected name.contains('项目'), got %q", f)
 		}
 	})
 
-	t.Run("comma separated fields become OR array", func(t *testing.T) {
+	t.Run("key field becomes equality CEL", func(t *testing.T) {
+		f, err := parseFilter("key=todo")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if f != "key == 'todo'" {
+			t.Errorf("expected key == 'todo', got %q", f)
+		}
+	})
+
+	t.Run("comma separated fields join with OR", func(t *testing.T) {
 		f, err := parseFilter("name=todo,key=todo")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(f) != 2 {
-			t.Fatalf("expected 2 elements, got %d", len(f))
+		if f != "name.contains('todo') || key == 'todo'" {
+			t.Errorf("expected OR-joined CEL, got %q", f)
 		}
-		if _, ok := f[0]["name"]; !ok {
-			t.Fatal("expected first element to have name field")
+	})
+
+	t.Run("escapes single quote in value", func(t *testing.T) {
+		f, err := parseFilter("name=it's")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-		if _, ok := f[1]["key"]; !ok {
-			t.Fatal("expected second element to have key field")
+		if f != `name.contains('it\'s')` {
+			t.Errorf("expected escaped quote, got %q", f)
 		}
 	})
 

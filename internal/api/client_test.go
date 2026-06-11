@@ -106,7 +106,7 @@ func TestListApps(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		apps, total, err := New(srv.URL, "test-token").ListApps(1, 10, nil)
+		apps, total, err := New(srv.URL, "test-token").ListApps(1, 10, "")
 		if err != nil {
 			t.Fatalf("ListApps: %v", err)
 		}
@@ -127,7 +127,7 @@ func TestListApps(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		if _, _, err := New(srv.URL, "test-token").ListApps(1, 10, nil); err == nil {
+		if _, _, err := New(srv.URL, "test-token").ListApps(1, 10, ""); err == nil {
 			t.Fatal("expected error on API failure")
 		}
 	})
@@ -142,7 +142,7 @@ func TestListApps(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		apps, total, err := New(srv.URL, "test-token").ListApps(1, 10, nil)
+		apps, total, err := New(srv.URL, "test-token").ListApps(1, 10, "")
 		if err != nil {
 			t.Fatalf("ListApps: %v", err)
 		}

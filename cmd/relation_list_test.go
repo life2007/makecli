@@ -70,24 +70,12 @@ func TestRunRelationList(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode request: %v", err)
 			}
-			filterRaw, ok := req["filter"]
+			obj, ok := req["filter"].(map[string]any)
 			if !ok {
-				t.Fatal("expected filter in request body")
+				t.Fatalf("expected filter to be Expression object, got %T", req["filter"])
 			}
-			filters, ok := filterRaw.([]any)
-			if !ok || len(filters) != 1 {
-				t.Fatalf("expected filter array with 1 element, got %v", filterRaw)
-			}
-			first, ok := filters[0].(map[string]any)
-			if !ok {
-				t.Fatalf("expected filter[0] to be object, got %T", filters[0])
-			}
-			nameCond, ok := first["name"].(map[string]any)
-			if !ok {
-				t.Fatalf("expected filter[0].name to be object, got %T", first["name"])
-			}
-			if nameCond["contains"] != "project" {
-				t.Fatalf("expected filter[0].name.contains == \"project\", got %v", nameCond["contains"])
+			if obj["expression"] != "name.contains('project')" {
+				t.Fatalf("expected name.contains('project'), got %v", obj["expression"])
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"code": 200, "msg": "success",

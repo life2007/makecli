@@ -96,15 +96,15 @@ func (c *Client) CreateApp(key, name string, properties map[string]any) error {
 }
 
 // ListApps 调用 MakeService.ListResources 获取 org 下全部 App
-// filter 为可选的服务端过滤条件（对象数组，数组元素间为 OR），nil 时不发送 filter 字段
+// filter 为可选的 CEL 表达式文本，空串时不发送 filter 字段
 // 返回 App 列表和服务端 total 数量
-func (c *Client) ListApps(page, size int, filter []map[string]any) ([]App, int, error) {
+func (c *Client) ListApps(page, size int, filter string) ([]App, int, error) {
 	reqBody := map[string]any{
 		"sort":       []map[string]any{{"fieldKey": "id", "order": "asc"}},
 		"pagination": map[string]any{"page": page, "size": size},
 	}
-	if filter != nil {
-		reqBody["filter"] = filter
+	if filter != "" {
+		reqBody["filter"] = map[string]any{"expression": filter}
 	}
 
 	var result struct {
@@ -214,16 +214,16 @@ func (c *Client) CreateEntity(key, name, appKey string, fields []Field) error {
 }
 
 // ListEntities 调用 MakeService.ListResources 获取指定 App 下全部 Entity
-// filter 为可选的服务端过滤条件（对象数组，数组元素间为 OR），nil 时不发送 filter 字段
+// filter 为可选的 CEL 表达式文本，空串时不发送 filter 字段
 // 返回 Entity 列表和服务端 total 数量
-func (c *Client) ListEntities(appKey string, page, size int, filter []map[string]any) ([]Entity, int, error) {
+func (c *Client) ListEntities(appKey string, page, size int, filter string) ([]Entity, int, error) {
 	reqBody := map[string]any{
 		"appKey":     appKey,
 		"sort":       []map[string]any{{"fieldKey": "id", "order": "asc"}},
 		"pagination": map[string]any{"page": page, "size": size},
 	}
-	if filter != nil {
-		reqBody["filter"] = filter
+	if filter != "" {
+		reqBody["filter"] = map[string]any{"expression": filter}
 	}
 	var result struct {
 		Code       int      `json:"code"`
@@ -309,16 +309,16 @@ func (c *Client) UpdateRelation(key, name, appKey string, props RelationProperti
 }
 
 // ListRelations 调用 MakeService.ListResources 获取指定 App 下全部 Relation
-// filter 为可选的服务端过滤条件（对象数组，数组元素间为 OR），nil 时不发送 filter 字段
+// filter 为可选的 CEL 表达式文本，空串时不发送 filter 字段
 // 返回 Relation 列表和服务端 total 数量
-func (c *Client) ListRelations(appKey string, page, size int, filter []map[string]any) ([]Relation, int, error) {
+func (c *Client) ListRelations(appKey string, page, size int, filter string) ([]Relation, int, error) {
 	reqBody := map[string]any{
 		"appKey":     appKey,
 		"sort":       []map[string]any{{"fieldKey": "id", "order": "asc"}},
 		"pagination": map[string]any{"page": page, "size": size},
 	}
-	if filter != nil {
-		reqBody["filter"] = filter
+	if filter != "" {
+		reqBody["filter"] = map[string]any{"expression": filter}
 	}
 	var result struct {
 		Code       int        `json:"code"`

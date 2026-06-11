@@ -204,7 +204,7 @@ func fetchAllEntities(client *api.Client, app string) ([]api.Entity, error) {
 	var all []api.Entity
 	page := 1
 	for {
-		batch, total, err := client.ListEntities(app, page, 100, nil)
+		batch, total, err := client.ListEntities(app, page, 100, "")
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +246,7 @@ func fetchAllRelations(client *api.Client, app string) ([]api.Relation, error) {
 	var all []api.Relation
 	page := 1
 	for {
-		batch, total, err := client.ListRelations(app, page, 100, nil)
+		batch, total, err := client.ListRelations(app, page, 100, "")
 		if err != nil {
 			return nil, err
 		}
