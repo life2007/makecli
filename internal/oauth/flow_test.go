@@ -170,3 +170,39 @@ func TestCallbackServerWaitTimeout(t *testing.T) {
 		t.Error("expected timeout error when no callback arrives")
 	}
 }
+
+// TestCallbackServerIgnoresEmptyRequest 回归：杂散的空 /callback 请求（无 code/error）
+// 必须被忽略并返回 204，不得占用 channel——否则它会抢先毒化 state 导致 "state mismatch"。
+// 紧随其后的真实回调才应被 Wait 取到。
+func TestCallbackServerIgnoresEmptyRequest(t *testing.T) {
+	cb, redirectURL, err := StartCallbackServer()
+	if err != nil {
+		t.Fatalf("StartCallbackServer: %v", err)
+	}
+	defer cb.Close()
+
+	// 1) 杂散空请求：必须被忽略，返回 204
+	stray, err := http.Get(redirectURL)
+	if err != nil {
+		t.Fatalf("stray GET: %v", err)
+	}
+	_ = stray.Body.Close()
+	if stray.StatusCode != http.StatusNoContent {
+		t.Errorf("stray request status = %d, want %d", stray.StatusCode, http.StatusNoContent)
+	}
+
+	// 2) 真实回调：Wait 必须拿到真实 code，而非被空请求毒化
+	real, err := http.Get(redirectURL + "?code=real-code&state=state-1")
+	if err != nil {
+		t.Fatalf("real GET: %v", err)
+	}
+	_ = real.Body.Close()
+
+	code, err := cb.Wait(context.Background(), "state-1")
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if code != "real-code" {
+		t.Errorf("code = %q, want real-code", code)
+	}
+}

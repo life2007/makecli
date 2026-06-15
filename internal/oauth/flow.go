@@ -156,6 +156,12 @@ type callbackResult struct {
 	err   string
 }
 
+// callbackSuccessHTML 是回调成功后浏览器展示的极简页面，不泄露任何 URL / 调试信息。
+const callbackSuccessHTML = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>makecli</title></head>` +
+	`<body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding-top:15vh;color:#1a1a1a">` +
+	`<h2 style="margin:0 0 .4em">✓ 登录成功</h2>` +
+	`<p style="color:#666">已获取访问令牌，可关闭本页返回终端。</p></body></html>`
+
 // StartCallbackServer 在 127.0.0.1 上绑定一个空闲端口并开始监听 /callback，
 // 返回服务器句柄与实际 redirectURL（含动态端口）。
 func StartCallbackServer() (*CallbackServer, string, error) {
@@ -178,12 +184,22 @@ func StartCallbackServer() (*CallbackServer, string, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
-		select {
-		case callback.results <- callbackResult{code: query.Get("code"), state: query.Get("state"), err: query.Get("error")}:
-		default: // 已收到首个回调，后续重复请求直接忽略
+		code, state, authErr := query.Get("code"), query.Get("state"), query.Get("error")
+
+		// 只认携带授权结果（code 或 error）的真实回调；浏览器预取、首次授权的中转跳转等
+		// 杂散空 /callback 请求一律忽略——否则空请求会抢先占满 cap-1 channel，
+		// 让 Wait 读到空 state → "state mismatch"。
+		if code == "" && authErr == "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, "Authorization received. You can return to the terminal.\n")
+
+		select {
+		case callback.results <- callbackResult{code: code, state: state, err: authErr}:
+		default: // 首个真实回调已入队，后续重复请求直接忽略
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, callbackSuccessHTML)
 	})
 
 	callback.server = &http.Server{Handler: mux}
