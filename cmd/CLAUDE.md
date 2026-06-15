@@ -19,7 +19,7 @@
 - 单测需要切换 profile 时用 `setProfile(t, "name")`（stdout_test.go），t.Cleanup 自动还原
 
 ## 成员清单
-root.go:             根命令入口，挂载所有顶级子命令（schema / apply / diff / update / integration 等；deploy 已下沉为 app 子命令），对外暴露 Execute(version, date)；定义全局 PersistentFlag --profile / --server-url / --repo-server-url / --debug，分别绑定全局变量 Profile / ServerURL / RepoServerURL / DebugMode；defaultMetaServer / defaultRepoServer 常量；钩入 notifier.Start/Finish 生命周期；包内 commandName 解析顶级命令名
+root.go:             根命令入口，挂载所有顶级子命令（schema / apply / diff / update / integration / preflight 等；deploy 已下沉为 app 子命令），对外暴露 Execute(version, date)；定义全局 PersistentFlag --profile / --server-url / --repo-server-url / --debug，分别绑定全局变量 Profile / ServerURL / RepoServerURL / DebugMode；defaultMetaServer / defaultRepoServer 常量；钩入 notifier.Start/Finish 生命周期；包内 commandName 解析顶级命令名
 root_test.go:        覆盖 commandName 顶级命令解析的单元测试（version/version list/update/app create/空 args/未知命令）
 version.go:          version 子命令组，默认 Run 打印当前版本（参考 GitHub CLI 模式），挂载 list 子命令
 version_test.go:     覆盖 formatVersion / changelogURL 的纯函数测试
@@ -69,6 +69,8 @@ record_list.go:             record list 子命令，分页查询 Record，自动
 record_list_test.go:        覆盖 runRecordList 的单元测试（表格/JSON/空列表/无凭证/API错误/未知profile/非法页码/非法格式/非法排序），用 httptest 隔离网络
 deploy.go:           app deploy 子命令（`makecli app deploy`），--env preview|production（必选）选定环境后调用代码仓库服务 CreateRepository（MakeService.CreateResource，幂等）拿到对应 cloneUrl，git push 当前 HEAD 到固定分支 HEAD:refs/heads/<deployBranch>（常量 dev，webhook 约定，非用户旋钮）触发构建 webhook；--app 缺省时取 git 仓库根目录名推断 app key；--force 透传强制推送；token 经 GIT_CONFIG_* 环境变量注入 Basic 认证（make:<token>，不进程序参数避免 ps 泄露），credential.helper 置空防 keychain 介入；gitOutputFunc / gitPushFunc 包级变量便于测试打桩
 deploy_test.go:      覆盖 runDeploy 的单元测试（preview/production 推送目标、--force 透传、appKey 推断与非法推断、非 git 仓库、非法 env、无凭证、API 错误、cloneUrl 缺失、push 失败），stubGit 打桩 git 交互 + httptest 隔离网络
+preflight.go:        preflight 顶级子命令，校验工作目录（可选位置参数 [dir]，默认 cwd）是否具备 Make app 必需骨架——apps/dsl 目录 + apps/service/package.json + apps/ui/package.json；逐项 os.Stat 打印 ✓/✗ 清单，任一缺失或类型不符返回 errPreflightFailed（main.go 转译退出码 1，SilenceErrors 不污染 stderr），作 CI/deploy 前置门禁；requiredLayout 切片驱动统一校验，layoutEntry{path,dir} 区分目录/文件
+preflight_test.go:   覆盖 runPreflight 的单元测试（完整骨架通过 / dsl 缺失 / service 缺 package.json / ui 缺 package.json / dsl 是文件非目录 / 空目录全失败），用 t.TempDir 构造真实目录树隔离文件系统
 apply.go:            apply 子命令，从 YAML 文件/目录批量应用资源（create-or-update 语义：按 Key 检测存在性，App 不存在则创建/已存在则跳过，Entity/Relation 不存在则创建/已存在则更新）；存在性判定经 api.ErrNotFound 哨兵——仅"确实不存在"才创建，Get 的瞬时/传输/非 not-found 错误一律上抛不创建（杜绝误建重复资源或把 update 降级为 create）；依赖顺序 App→Entity→Relation；ResourceManifest 提供 Key（标识符）/Name（展示名）/Type/AppKey/Meta/Properties 字段；支持多文档 YAML 和目录扫描
 apply_test.go:       apply 子命令的单元测试，覆盖单文件、多文档、目录扫描、Relation 创建/更新/缺 appKey 字段错误、App+Entity+Relation 混合目录场景
 diff.go:             diff 子命令，对比远端 Meta Server 上的 App DSL（Entity + Relation）与本地 YAML 文件的差异；App key 从 YAML 自动推断（Make.App key 或 Entity/Relation appKey 字段）；分页获取全部远端资源，按 Key 匹配后逐字段（key）/端点（entityKey）比对；支持 -f（必选）/ --output；退出码 0=无差异 1=有差异（table 与 json 模式一致，经 errDiffFound 哨兵上抛到 main 转译，不再用 os.Exit，可单测）；命令开 SilenceErrors，由 reportDiffError 亲自打印真实错误、放过 errDiffFound 哨兵不污染 stderr
