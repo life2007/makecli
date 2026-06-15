@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 github.com/spf13/cobra、github.com/spf13/pflag、os、internal/notifier
  * [OUTPUT]: 对外提供 Execute 函数、rootCmd 根命令、全局变量 Profile / ServerURL / DebugMode；包内 commandName 解析器
- * [POS]: cmd 模块的入口，挂载 version / configure / app / entity / relation / record / apply / diff / update / schema / integration / preflight 子命令；定义全局 --profile / --server-url / --debug 三个 PersistentFlag
+ * [POS]: cmd 模块的入口，挂载 version / configure / login / app / entity / relation / record / apply / diff / update / schema / integration / preflight 子命令；定义全局 --profile / --server-url / --debug 三个 PersistentFlag
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -94,6 +94,7 @@ func Execute(version, buildDate string) error {
 	rootCmd.PersistentFlags().StringVar(&Profile, "profile", "default", "credentials profile to use")
 	rootCmd.AddCommand(newVersionCmd(version, buildDate))
 	rootCmd.AddCommand(newConfigureCmd())
+	rootCmd.AddCommand(newLoginCmd())
 	rootCmd.AddCommand(newApplyCmd())
 	rootCmd.AddCommand(newAppCmd())
 	rootCmd.AddCommand(newEntityCmd())
