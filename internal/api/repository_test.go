@@ -60,8 +60,8 @@ func TestCreateRepository(t *testing.T) {
 		if got := repo.CloneURLFor("production"); got != "https://repo.example/org/myapp-production.git" {
 			t.Errorf("production cloneUrl = %q", got)
 		}
-		if repo.Properties.Env["preview"].Repository.GiteaRepoID != 321 {
-			t.Errorf("preview giteaRepoId = %d, want 321", repo.Properties.Env["preview"].Repository.GiteaRepoID)
+		if repo.Properties.Env["preview"].Repository.MakeRepoID != 321 {
+			t.Errorf("preview MakeRepoID = %d, want 321", repo.Properties.Env["preview"].Repository.MakeRepoID)
 		}
 	})
 

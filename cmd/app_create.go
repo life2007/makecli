@@ -3,7 +3,7 @@
  * [OUTPUT]: 对外提供 newAppCreateCmd 函数；包内 runAppCreate / assertScaffoldClear / writeScaffold / renderAppDSL / newAppManifest / deriveAppKey
  * [POS]: cmd/app 的 create 子命令——合并了原 app init：一条命令完成 本地脚手架 + 远端 App + 代码仓库。
  *        位置参数 <appKey> 同时是「目录名 + key」（filepath.Base(filepath.Abs(arg)) 推导，`.`/`..` 隐藏便利），
- *        validResourceKey 把关；写 CLAUDE.md/AGENTS.md（embed 模板）+ apps/dsl/app.yaml（ResourceManifest 序列化，与 apply/diff 同结构往返）；
+ *        validResourceKey 把关；写 CLAUDE.md/AGENTS.md/.gitignore（embed 模板，scaffoldFile 映射 embed→out 名）+ apps/dsl/app.yaml（ResourceManifest 序列化，与 apply/diff 同结构往返）；.gitignore 让 deploy 的 git add -A 不吞 node_modules；
  *        执行序「远端先行」：存在性预检(assertScaffoldClear,只读)→CreateApp→writeScaffold，远端失败时本地零残留，重跑干净；本地/远端冲突即拒绝（提示删除重建）；
  *        prepareCodeRepos 成功静默（仅 deploy 关心仓库地址），失败降级为 stderr 警告；-f 文件模式仅建远端不脚手架
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -22,8 +22,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// scaffoldTemplates 是脚手架从 embed 写出的 agent 引导文件（写出时去 .tmpl 后缀）
-var scaffoldTemplates = []string{"CLAUDE.md", "AGENTS.md"}
+// scaffoldFile 把 embed 模板名映射到写出文件名——多数同名去 .tmpl，
+// .gitignore 是例外（embed 名不能带前导点，故用 gitignore.tmpl 显式映射）。
+type scaffoldFile struct{ embed, out string }
+
+// scaffoldTemplates 是脚手架从 embed 写出的引导文件。
+// .gitignore 让 deploy 的 git add -A 不会吞掉 node_modules / 构建产物 / 密钥。
+var scaffoldTemplates = []scaffoldFile{
+	{"CLAUDE.md.tmpl", "CLAUDE.md"},
+	{"AGENTS.md.tmpl", "AGENTS.md"},
+	{"gitignore.tmpl", ".gitignore"},
+}
 
 // appDSLPath 是 App DSL 种子在工程内的相对路径（对齐 preflight 骨架）
 var appDSLPath = filepath.Join("apps", "dsl", "app.yaml")
@@ -127,7 +136,10 @@ func newAppManifest(appKey, name, description string) ResourceManifest {
 // 与写出分离：在远端创建之前调用（只读 os.Stat，不动文件系统），
 // 避免「远端建好但本地拒绝」的反向半成品。
 func assertScaffoldClear(folder string) error {
-	targets := append(append([]string{}, scaffoldTemplates...), appDSLPath)
+	targets := []string{appDSLPath}
+	for _, f := range scaffoldTemplates {
+		targets = append(targets, f.out)
+	}
 	for _, name := range targets {
 		target := filepath.Join(folder, name)
 		if _, err := os.Stat(target); err == nil {
@@ -137,18 +149,18 @@ func assertScaffoldClear(folder string) error {
 	return nil
 }
 
-// writeScaffold 写出本地工程骨架：CLAUDE.md / AGENTS.md（embed 模板）+ apps/dsl/app.yaml（DSL 种子）。
+// writeScaffold 写出本地工程骨架：CLAUDE.md / AGENTS.md / .gitignore（embed 模板）+ apps/dsl/app.yaml（DSL 种子）。
 // 假定目标已由 assertScaffoldClear 确认为空；仅在远端 App 创建成功后调用。
 func writeScaffold(folder string, manifest ResourceManifest) error {
 	if err := os.MkdirAll(folder, 0755); err != nil {
 		return fmt.Errorf("create '%s': %w", folder, err)
 	}
-	for _, name := range scaffoldTemplates {
-		data, err := agents.Templates.ReadFile(name + ".tmpl")
+	for _, f := range scaffoldTemplates {
+		data, err := agents.Templates.ReadFile(f.embed)
 		if err != nil {
-			return fmt.Errorf("read embedded %s: %w", name, err)
+			return fmt.Errorf("read embedded %s: %w", f.embed, err)
 		}
-		if err := os.WriteFile(filepath.Join(folder, name), data, 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(folder, f.out), data, 0644); err != nil {
 			return err
 		}
 	}

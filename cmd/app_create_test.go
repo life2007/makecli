@@ -68,7 +68,7 @@ func TestRenderAppDSL(t *testing.T) {
 // ---------------------------------- 本地脚手架 ----------------------------------
 
 func TestWriteScaffold(t *testing.T) {
-	scaffoldFiles := []string{"CLAUDE.md", "AGENTS.md", filepath.Join("apps", "dsl", "app.yaml")}
+	scaffoldFiles := []string{"CLAUDE.md", "AGENTS.md", ".gitignore", filepath.Join("apps", "dsl", "app.yaml")}
 
 	t.Run("creates agent files and app.yaml", func(t *testing.T) {
 		dir := t.TempDir()
@@ -106,6 +106,20 @@ func TestWriteScaffold(t *testing.T) {
 		}
 	})
 
+	t.Run(".gitignore excludes node_modules so deploy won't commit it", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := writeScaffold(dir, newAppManifest("shop", "shop", "")); err != nil {
+			t.Fatalf("writeScaffold: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+		if err != nil {
+			t.Fatalf("read .gitignore: %v", err)
+		}
+		if !strings.Contains(string(data), "node_modules") {
+			t.Errorf(".gitignore must ignore node_modules, got: %q", data)
+		}
+	})
+
 	t.Run("AGENTS.md includes runtime build contract", func(t *testing.T) {
 		dir := t.TempDir()
 		if err := writeScaffold(dir, newAppManifest("shop", "shop", "")); err != nil {
@@ -136,7 +150,7 @@ func TestAssertScaffoldClear(t *testing.T) {
 	})
 
 	t.Run("refuses when a scaffold file already exists", func(t *testing.T) {
-		for _, existing := range []string{"CLAUDE.md", "AGENTS.md", filepath.Join("apps", "dsl", "app.yaml")} {
+		for _, existing := range []string{"CLAUDE.md", "AGENTS.md", ".gitignore", filepath.Join("apps", "dsl", "app.yaml")} {
 			dir := t.TempDir()
 			target := filepath.Join(dir, existing)
 			_ = os.MkdirAll(filepath.Dir(target), 0755)

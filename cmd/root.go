@@ -23,7 +23,7 @@ var DebugMode bool
 // MetaServerURL Meta Server 基础 URL，从命令行读取
 var MetaServerURL string
 
-// RepoServerURL 代码仓库服务（make-gitea）基础 URL，从命令行读取
+// RepoServerURL 代码仓库服务（make-repo）基础 URL，从命令行读取
 var RepoServerURL string
 
 // Profile 全局凭证 profile 名称，从命令行读取（--profile）。

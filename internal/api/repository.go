@@ -2,7 +2,7 @@
  * [INPUT]: 依赖 client.go 的 Client.do / notFoundCode / ErrNotFound、fmt
  * [OUTPUT]: 对外提供 CodeRepo / CodeRepoEnv / CodeRepoMeta / CodeRepoProperties / CodeRepoResource 类型、
  *           Client.CreateRepository(appKey) 方法、CodeRepoResource.CloneURLFor(env) 收口方法
- * [POS]: internal/api 的代码仓库服务（make-gitea）调用层，POST /code/v1/repository，
+ * [POS]: internal/api 的代码仓库服务（make-repo）调用层，POST /code/v1/repository，
  *        经 X-Make-Target 区分动作；与 client.go 的 Meta 操作共用 Client 与 do 原语
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -14,11 +14,12 @@ import "fmt"
 // codeRepoType 是代码仓库资源的固定 type 标识
 const codeRepoType = "Make.Code.Repository"
 
-// CodeRepo 描述单个 Gitea 仓库（repoName / giteaRepoId / cloneUrl）。
+// CodeRepo 描述单个远端仓库（repoName / cloneUrl；MakeRepoID 映射服务端 giteaRepoId 字段——
+// json tag 是线上契约不可改，Go 字段名去耦底层实现）。
 // Environment 仅在 meta.repositories 兼容形态中出现。
 type CodeRepo struct {
 	RepoName    string `json:"repoName"`
-	GiteaRepoID int64  `json:"giteaRepoId"`
+	MakeRepoID  int64  `json:"giteaRepoId"`
 	CloneURL    string `json:"cloneUrl"`
 	Environment string `json:"environment,omitempty"`
 }

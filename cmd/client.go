@@ -107,7 +107,7 @@ func newClientFromProfile() (*api.Client, error) {
 	return api.New(server, token, api.WithDebug(DebugMode), api.WithHeaders(headers)), nil
 }
 
-// newRepoClientFromProfile 构建指向代码仓库服务（make-gitea）的 API 客户端。
+// newRepoClientFromProfile 构建指向代码仓库服务（make-repo）的 API 客户端。
 // 额外返回裸 token，供 deploy 的 git push HTTP Basic 认证使用。
 func newRepoClientFromProfile() (*api.Client, string, error) {
 	token, cp, headers, err := resolveProfile()
