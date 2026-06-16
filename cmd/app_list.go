@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 cmd/client（newClientFromProfile）、fmt、os、strings、github.com/olekukonko/tablewriter、github.com/spf13/cobra、cmd/output 辅助
  * [OUTPUT]: 对外提供 newAppListCmd 函数、parseFilter 解析 --filter 语法
- * [POS]: cmd/app 的 list 子命令，分页列出 org 下全部 App，输出列 KEY/NAME/VERSION/CREATED AT；支持 --filter / table|json 输出；filter 支持 name(contains 模糊) / key(等值) / description
+ * [POS]: cmd/app 的 list 子命令，分页列出 org 下全部 App，输出列 KEY/NAME/DESCRIPTION/VERSION/CREATED AT（description 取自 Properties）；支持 --filter / table|json 输出；filter 支持 name(contains 模糊) / key(等值) / description
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -123,11 +123,12 @@ func runAppList(page, size int, output, filterExpr string) error {
 	for i, app := range apps {
 		version, _ := app.Meta["version"].(string)
 		createdAt, _ := app.Meta["createdAt"].(string)
-		rows[i] = []string{app.Key, app.Name, version, createdAt}
+		description, _ := app.Properties["description"].(string)
+		rows[i] = []string{app.Key, app.Name, description, version, createdAt}
 	}
 
 	table := tablewriter.NewTable(os.Stdout)
-	table.Header("KEY", "NAME", "VERSION", "CREATED AT")
+	table.Header("KEY", "NAME", "DESCRIPTION", "VERSION", "CREATED AT")
 	_ = table.Bulk(rows)
 	_ = table.Render()
 
