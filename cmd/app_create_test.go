@@ -1,7 +1,7 @@
 /**
- * [INPUT]: 依赖 cmd 包内的 runAppCreate/runAppCreateFromFile（包内白盒），internal/config、encoding/json、net/http、net/http/httptest、os、path/filepath
- * [OUTPUT]: 覆盖 app create 子命令核心逻辑的单元测试（含 -f 文件模式）
- * [POS]: cmd 模块 app_create.go 的配套测试，用 httptest 隔离网络、t.Setenv 隔离凭证
+ * [INPUT]: 依赖 cmd 包内的 runAppCreate/runAppCreateFromFile/assertScaffoldClear/writeScaffold/renderAppDSL/newAppManifest（包内白盒），internal/config、encoding/json、net/http、net/http/httptest、os、path/filepath
+ * [OUTPUT]: 覆盖 app create 子命令核心逻辑的单元测试（脚手架 + 远端创建合并；成功静默 / 失败警告；含 -f 文件模式）
+ * [POS]: cmd 模块 app_create.go 的配套测试，用 httptest 隔离网络、t.Setenv 隔离凭证、t.TempDir 隔离文件系统
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -19,8 +19,139 @@ import (
 	"github.com/qfeius/makecli/internal/config"
 )
 
+// ---------------------------------- app.yaml 生成 ----------------------------------
+
+func TestRenderAppDSL(t *testing.T) {
+	t.Run("renders canonical Make.App DSL", func(t *testing.T) {
+		data, err := renderAppDSL(newAppManifest("shop", "商城", "demo shop"))
+		if err != nil {
+			t.Fatalf("renderAppDSL: %v", err)
+		}
+		got := string(data)
+		for _, want := range []string{"key: shop", "name: 商城", "type: Make.App", "version: 1.0.0", "description: demo shop"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("rendered DSL missing %q:\n%s", want, got)
+			}
+		}
+	})
+
+	t.Run("uses 2-space indent", func(t *testing.T) {
+		data, err := renderAppDSL(newAppManifest("shop", "shop", ""))
+		if err != nil {
+			t.Fatalf("renderAppDSL: %v", err)
+		}
+		// meta.version 应缩进 2 空格（对齐 DSL 例子），而非 yaml.v3 默认的 4 空格
+		if !strings.Contains(string(data), "\n  version: 1.0.0") {
+			t.Errorf("expected 2-space indented version, got:\n%s", data)
+		}
+	})
+
+	t.Run("round-trips through loadAppManifestFromFile", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "app.yaml")
+		data, err := renderAppDSL(newAppManifest("shop", "商城", "demo"))
+		if err != nil {
+			t.Fatalf("renderAppDSL: %v", err)
+		}
+		writeTestFile(t, f, data)
+
+		m, err := loadAppManifestFromFile(f)
+		if err != nil {
+			t.Fatalf("loadAppManifestFromFile: %v", err)
+		}
+		if m.Key != "shop" || m.Name != "商城" || m.Type != "Make.App" {
+			t.Errorf("round-trip mismatch: %+v", m)
+		}
+	})
+}
+
+// ---------------------------------- 本地脚手架 ----------------------------------
+
+func TestWriteScaffold(t *testing.T) {
+	scaffoldFiles := []string{"CLAUDE.md", "AGENTS.md", filepath.Join("apps", "dsl", "app.yaml")}
+
+	t.Run("creates agent files and app.yaml", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := writeScaffold(dir, newAppManifest("shop", "shop", "")); err != nil {
+			t.Fatalf("writeScaffold: %v", err)
+		}
+		for _, name := range scaffoldFiles {
+			if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+				t.Errorf("expected %s to exist: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("creates nested folder if not exists", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "newapp")
+		if err := writeScaffold(dir, newAppManifest("newapp", "newapp", "")); err != nil {
+			t.Fatalf("writeScaffold: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "apps", "dsl", "app.yaml")); err != nil {
+			t.Errorf("expected app.yaml to exist: %v", err)
+		}
+	})
+
+	t.Run("app.yaml round-trips with the manifest", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := writeScaffold(dir, newAppManifest("shop", "商城", "")); err != nil {
+			t.Fatalf("writeScaffold: %v", err)
+		}
+		m, err := loadAppManifestFromFile(filepath.Join(dir, "apps", "dsl", "app.yaml"))
+		if err != nil {
+			t.Fatalf("loadAppManifestFromFile: %v", err)
+		}
+		if m.Key != "shop" || m.Name != "商城" || m.Type != "Make.App" {
+			t.Errorf("scaffolded app.yaml mismatch: %+v", m)
+		}
+	})
+
+	t.Run("AGENTS.md includes runtime build contract", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := writeScaffold(dir, newAppManifest("shop", "shop", "")); err != nil {
+			t.Fatalf("writeScaffold: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+		if err != nil {
+			t.Fatalf("read AGENTS.md: %v", err)
+		}
+		content := string(data)
+		for _, want := range []string{
+			"make-app-runtime", "apps/ui/dist", "apps/service/dist/server.js",
+			"apps/ui/package.json", "apps/service/package.json", "build/start",
+			"apps/package.json", "pnpm run build",
+		} {
+			if !strings.Contains(content, want) {
+				t.Errorf("AGENTS.md missing %q", want)
+			}
+		}
+	})
+}
+
+func TestAssertScaffoldClear(t *testing.T) {
+	t.Run("passes on an empty folder", func(t *testing.T) {
+		if err := assertScaffoldClear(t.TempDir()); err != nil {
+			t.Errorf("expected clear folder to pass: %v", err)
+		}
+	})
+
+	t.Run("refuses when a scaffold file already exists", func(t *testing.T) {
+		for _, existing := range []string{"CLAUDE.md", "AGENTS.md", filepath.Join("apps", "dsl", "app.yaml")} {
+			dir := t.TempDir()
+			target := filepath.Join(dir, existing)
+			_ = os.MkdirAll(filepath.Dir(target), 0755)
+			writeTestFile(t, target, []byte("x"))
+			if err := assertScaffoldClear(dir); err == nil {
+				t.Errorf("expected refusal when %s exists", existing)
+			}
+		}
+	})
+}
+
+// ---------------------------------- 合并后的 create（脚手架 + 远端） ----------------------------------
+
 func TestRunAppCreate(t *testing.T) {
-	t.Run("creates app via API", func(t *testing.T) {
+	t.Run("scaffolds locally and creates app remotely", func(t *testing.T) {
 		srv := newMockMeta(t, 200, "create app success")
 		defer srv.Close()
 		t.Setenv("HOME", t.TempDir())
@@ -28,30 +159,70 @@ func TestRunAppCreate(t *testing.T) {
 		MetaServerURL = srv.URL
 		stubRepoServer(t, srv.URL)
 
-		if err := runAppCreate("myapp", "", ""); err != nil {
+		folder := filepath.Join(t.TempDir(), "shop")
+		if err := runAppCreate(folder, "", ""); err != nil {
 			t.Fatalf("runAppCreate: %v", err)
+		}
+		// 本地脚手架已落地
+		m, err := loadAppManifestFromFile(filepath.Join(folder, "apps", "dsl", "app.yaml"))
+		if err != nil {
+			t.Fatalf("scaffolded app.yaml: %v", err)
+		}
+		if m.Key != "shop" {
+			t.Errorf("appKey from folder name = %q, want shop", m.Key)
 		}
 	})
 
-	t.Run("prints code repositories after create", func(t *testing.T) {
+	t.Run("derives appKey from current dir on '.'", func(t *testing.T) {
 		srv := newMockMeta(t, 200, "create app success")
 		defer srv.Close()
 		t.Setenv("HOME", t.TempDir())
 		saveDefaultToken(t)
 		MetaServerURL = srv.URL
-		stubRepoServer(t, newMockRepoServer(t).URL)
+		stubRepoServer(t, srv.URL)
 
-		out := captureStdout(t, func() {
-			if err := runAppCreate("myapp", "", ""); err != nil {
-				t.Errorf("runAppCreate: %v", err)
-			}
-		})
-		if !strings.Contains(out, "myapp-preview.git") || !strings.Contains(out, "myapp-production.git") {
-			t.Errorf("output missing clone urls: %q", out)
+		work := filepath.Join(t.TempDir(), "shopapp")
+		if err := os.MkdirAll(work, 0755); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, work)
+
+		if err := runAppCreate(".", "", ""); err != nil {
+			t.Fatalf("runAppCreate '.': %v", err)
+		}
+		m, err := loadAppManifestFromFile(filepath.Join("apps", "dsl", "app.yaml"))
+		if err != nil {
+			t.Fatalf("scaffolded app.yaml: %v", err)
+		}
+		if m.Key != "shopapp" {
+			t.Errorf("appKey from '.' = %q, want shopapp", m.Key)
 		}
 	})
 
-	t.Run("repo preparation failure does not fail create", func(t *testing.T) {
+	t.Run("success output is concise: only the created line", func(t *testing.T) {
+		srv := newMockMeta(t, 200, "create app success")
+		defer srv.Close()
+		t.Setenv("HOME", t.TempDir())
+		saveDefaultToken(t)
+		MetaServerURL = srv.URL
+		// 即便仓库服务可用，成功时也不打印仓库信息（仅 deploy 关心仓库地址）
+		stubRepoServer(t, newMockRepoServer(t).URL)
+
+		folder := filepath.Join(t.TempDir(), "myapp")
+		out := captureStdout(t, func() {
+			if err := runAppCreate(folder, "", ""); err != nil {
+				t.Errorf("runAppCreate: %v", err)
+			}
+		})
+		if strings.Contains(out, "Code repositories") || strings.Contains(out, ".git") {
+			t.Errorf("success output should not include repository info, got:\n%s", out)
+		}
+		if strings.TrimSpace(out) != "App 'myapp' created successfully" {
+			t.Errorf("success output not concise, got:\n%s", out)
+		}
+	})
+
+	t.Run("warns on stderr but succeeds when repo prep fails", func(t *testing.T) {
 		srv := newMockMeta(t, 200, "create app success")
 		defer srv.Close()
 		repoSrv := newMockMeta(t, 500, "repository could not be prepared")
@@ -61,12 +232,20 @@ func TestRunAppCreate(t *testing.T) {
 		MetaServerURL = srv.URL
 		stubRepoServer(t, repoSrv.URL)
 
-		if err := runAppCreate("myapp", "", ""); err != nil {
-			t.Fatalf("repo failure should not fail app create: %v", err)
+		folder := filepath.Join(t.TempDir(), "myapp")
+		var runErr error
+		errOut := captureStderr(t, func() {
+			runErr = runAppCreate(folder, "", "")
+		})
+		if runErr != nil {
+			t.Fatalf("repo failure should not fail app create: %v", runErr)
+		}
+		if !strings.Contains(errOut, "code repositories not ready") {
+			t.Errorf("expected repo-prep warning on stderr, got:\n%s", errOut)
 		}
 	})
 
-	t.Run("uses --name as key when key omitted", func(t *testing.T) {
+	t.Run("writes description into app.yaml", func(t *testing.T) {
 		srv := newMockMeta(t, 200, "create app success")
 		defer srv.Close()
 		t.Setenv("HOME", t.TempDir())
@@ -74,72 +253,76 @@ func TestRunAppCreate(t *testing.T) {
 		MetaServerURL = srv.URL
 		stubRepoServer(t, srv.URL)
 
-		cmd := newAppCreateCmd()
-		cmd.SetArgs([]string{"--name", "myapp"})
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("app create --name myapp: %v", err)
+		folder := filepath.Join(t.TempDir(), "myapp")
+		if err := runAppCreate(folder, "My App", "awesome"); err != nil {
+			t.Fatalf("runAppCreate with description: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(folder, "apps", "dsl", "app.yaml"))
+		if err != nil {
+			t.Fatalf("read app.yaml: %v", err)
+		}
+		if !strings.Contains(string(data), "description: awesome") {
+			t.Errorf("app.yaml missing description:\n%s", data)
 		}
 	})
 
-	t.Run("fails without key and name", func(t *testing.T) {
-		cmd := newAppCreateCmd()
-		cmd.SetArgs([]string{})
-		cmd.SilenceErrors = true
-		if err := cmd.Execute(); err == nil {
-			t.Fatal("expected error without key, --name and -f")
-		}
-	})
-
-	t.Run("rejects invalid app name", func(t *testing.T) {
-		cases := []struct {
-			name string
-			desc string
-		}{
-			{"my-app", "contains hyphen"},
-			{"my app", "contains space"},
-			{"my.app", "contains dot"},
-			{"我的app", "contains chinese"},
-			{"a_very_long_name_that_is", "exceeds 20 chars"},
-			{"", "empty string"},
-		}
-		for _, tc := range cases {
-			if err := runAppCreate(tc.name, "", ""); err == nil {
-				t.Errorf("expected error for %s (%s)", tc.name, tc.desc)
+	t.Run("rejects invalid directory name as app key", func(t *testing.T) {
+		cases := []string{"my-app", "my app", "my.app", "我的app", "a_very_long_name_that_is"}
+		for _, folder := range cases {
+			if err := runAppCreate(folder, "", ""); err == nil {
+				t.Errorf("expected error for invalid folder name %q", folder)
 			}
 		}
 	})
 
-	t.Run("creates app with description", func(t *testing.T) {
-		srv := newMockMeta(t, 200, "create app success")
-		defer srv.Close()
-		t.Setenv("HOME", t.TempDir())
-		saveDefaultToken(t)
-		MetaServerURL = srv.URL
-		stubRepoServer(t, srv.URL)
-
-		if err := runAppCreate("myapp", "test app", ""); err != nil {
-			t.Fatalf("runAppCreate with description: %v", err)
-		}
-	})
-
-	t.Run("fails without credentials", func(t *testing.T) {
+	t.Run("fails without credentials before scaffolding", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		MetaServerURL = "http://unused"
-		// 未写入任何凭证，预期报错
-		if err := runAppCreate("myapp", "", ""); err == nil {
+		folder := filepath.Join(t.TempDir(), "myapp")
+		if err := runAppCreate(folder, "", ""); err == nil {
 			t.Fatal("expected error for missing credentials")
+		}
+		// 无 token 应在脚手架前失败，不留下任何文件
+		if _, err := os.Stat(filepath.Join(folder, "CLAUDE.md")); err == nil {
+			t.Error("scaffold should not run without credentials")
 		}
 	})
 
-	t.Run("fails on API error response", func(t *testing.T) {
+	t.Run("API failure leaves no local files", func(t *testing.T) {
 		srv := newMockMeta(t, 400, "invalid app name")
 		defer srv.Close()
 		t.Setenv("HOME", t.TempDir())
 		saveDefaultToken(t)
 		MetaServerURL = srv.URL
 
-		if err := runAppCreate("myapp", "", ""); err == nil {
+		folder := filepath.Join(t.TempDir(), "myapp")
+		if err := runAppCreate(folder, "", ""); err == nil {
 			t.Fatal("expected error on API failure")
+		}
+		// 远端先行：CreateApp 失败时本地尚未落任何文件，保证换 profile 重跑干净
+		if _, err := os.Stat(folder); err == nil {
+			t.Error("remote failure should leave no local scaffold")
+		}
+	})
+
+	t.Run("refuses pre-existing local files without calling remote", func(t *testing.T) {
+		// 远端若被调用就让测试失败——证明存在性预检发生在远端创建之前
+		srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			t.Error("remote must not be called when local files already exist")
+		}))
+		defer srv.Close()
+		t.Setenv("HOME", t.TempDir())
+		saveDefaultToken(t)
+		MetaServerURL = srv.URL
+
+		folder := filepath.Join(t.TempDir(), "myapp")
+		if err := os.MkdirAll(folder, 0755); err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, filepath.Join(folder, "CLAUDE.md"), []byte("x"))
+
+		if err := runAppCreate(folder, "", ""); err == nil {
+			t.Fatal("expected refusal for pre-existing local files")
 		}
 	})
 
@@ -149,8 +332,20 @@ func TestRunAppCreate(t *testing.T) {
 		MetaServerURL = "http://unused"
 		setProfile(t, "nonexistent")
 
-		if err := runAppCreate("myapp", "", ""); err == nil {
+		folder := filepath.Join(t.TempDir(), "myapp")
+		if err := runAppCreate(folder, "", ""); err == nil {
 			t.Fatal("expected error for unknown profile")
+		}
+	})
+}
+
+func TestNewAppCreateCmd(t *testing.T) {
+	t.Run("fails without appKey and -f", func(t *testing.T) {
+		cmd := newAppCreateCmd()
+		cmd.SetArgs([]string{})
+		cmd.SilenceErrors = true
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error without appKey and -f")
 		}
 	})
 }
@@ -230,6 +425,21 @@ func TestValidResourceKey(t *testing.T) {
 			t.Errorf("validResourceKey(%q) expected error, got nil", key)
 		}
 	}
+}
+
+// ---------------------------------- 测试辅助 ----------------------------------
+
+// chdir 临时切换工作目录，测试结束自动还原（Go 1.22 无 t.Chdir）
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
 }
 
 // writeTestFile 在指定路径写入测试文件，失败则终止测试

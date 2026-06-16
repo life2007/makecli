@@ -1,21 +1,32 @@
 /**
- * [INPUT]: 依赖 cmd/client（newClientFromProfile/newRepoClientFromProfile）、cmd/app（loadAppManifestFromFile、validResourceKey）、internal/api（CodeRepoResource）、fmt、os、github.com/spf13/cobra
- * [OUTPUT]: 对外提供 newAppCreateCmd 函数
- * [POS]: cmd/app 的 create 子命令，调用 Meta Server API 创建 App。位置参数是 App key（英文标识符），--name 为展示名（支持中文）；
- *        key 缺省且 --name 是合法标识符时直接用 name 作 key；支持 --description 和 -f 文件模式；
- *        创建成功后调用代码仓库服务幂等准备 preview/production 双环境仓库（失败降级为警告，deploy 时自动重试）
+ * [INPUT]: 依赖 cmd/client（newClientFromProfile/newRepoClientFromProfile）、cmd/app（loadAppManifestFromFile、validResourceKey、defaultName）、cmd/apply（ResourceManifest）、agents（embed 模板）、bytes、fmt、os、path/filepath、gopkg.in/yaml.v3、github.com/spf13/cobra
+ * [OUTPUT]: 对外提供 newAppCreateCmd 函数；包内 runAppCreate / assertScaffoldClear / writeScaffold / renderAppDSL / newAppManifest / deriveAppKey
+ * [POS]: cmd/app 的 create 子命令——合并了原 app init：一条命令完成 本地脚手架 + 远端 App + 代码仓库。
+ *        位置参数 <appKey> 同时是「目录名 + key」（filepath.Base(filepath.Abs(arg)) 推导，`.`/`..` 隐藏便利），
+ *        validResourceKey 把关；写 CLAUDE.md/AGENTS.md（embed 模板）+ apps/dsl/app.yaml（ResourceManifest 序列化，与 apply/diff 同结构往返）；
+ *        执行序「远端先行」：存在性预检(assertScaffoldClear,只读)→CreateApp→writeScaffold，远端失败时本地零残留，重跑干净；本地/远端冲突即拒绝（提示删除重建）；
+ *        prepareCodeRepos 成功静默（仅 deploy 关心仓库地址），失败降级为 stderr 警告；-f 文件模式仅建远端不脚手架
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 
-	"github.com/qfeius/makecli/internal/api"
+	"github.com/qfeius/makecli/agents"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
+
+// scaffoldTemplates 是脚手架从 embed 写出的 agent 引导文件（写出时去 .tmpl 后缀）
+var scaffoldTemplates = []string{"CLAUDE.md", "AGENTS.md"}
+
+// appDSLPath 是 App DSL 种子在工程内的相对路径（对齐 preflight 骨架）
+var appDSLPath = filepath.Join("apps", "dsl", "app.yaml")
 
 func newAppCreateCmd() *cobra.Command {
 	var description string
@@ -23,35 +34,151 @@ func newAppCreateCmd() *cobra.Command {
 	var file string
 
 	cmd := &cobra.Command{
-		Use:   "create [key]",
-		Short: "Create a new app on Make",
-		Example: `  makecli app create myapp
-  makecli app create --name myapp
-  makecli app create myapp --name "我的应用"
-  makecli app create myapp --name "My App" --description "my awesome app"
-  makecli app create -f app.yaml`,
+		Use:   "create <appKey>",
+		Short: "Create a new Make app (scaffolds <appKey>/ and creates it on Make)",
+		Example: `  makecli app create shop
+  makecli app create shop --name "我的商城"
+  makecli app create shop --name "My Shop" --description "demo shop"
+  makecli app create -f apps/dsl/app.yaml`,
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if file != "" {
 				return runAppCreateFromFile(file)
 			}
-			key := displayName // key 缺省时回退用 --name（须为合法标识符，下游校验）
-			if len(args) > 0 {
-				key = args[0]
+			if len(args) == 0 {
+				return fmt.Errorf("requires <appKey> (or '.') or -f flag")
 			}
-			if key == "" {
-				return fmt.Errorf("requires app key, --name or -f flag")
-			}
-			return runAppCreate(key, displayName, description)
+			return runAppCreate(args[0], displayName, description)
 		},
 	}
 
 	cmd.Flags().StringVar(&description, "description", "", "app description")
-	cmd.Flags().StringVar(&displayName, "name", "", "app display name (defaults to key)")
-	cmd.Flags().StringVarP(&file, "file", "f", "", "path to YAML file containing Make.App resource")
+	cmd.Flags().StringVar(&displayName, "name", "", "app display name (defaults to appKey)")
+	cmd.Flags().StringVarP(&file, "file", "f", "", "path to YAML file containing Make.App resource (remote only, no scaffold)")
 	return cmd
 }
+
+// ---------------------------------- 脚手架模式：本地 + 远端 + 仓库 ----------------------------------
+
+// runAppCreate 执行合并后的 create：解析 appKey → 加载凭证 → 本地存在性预检 → 远端创建 → 写本地脚手架 → 准备仓库。
+// 顺序刻意「远端先行」：token 失效 / 冲突 / 网络故障都在写任何本地文件之前报错，
+// 这样换 profile 或修复 token 后重跑是干净的，不会被上一次的半成品工程拦住。
+// 存在性预检（只读 os.Stat）又放在远端之前——目标已存在就尽早拒绝，避免白白创建远端 App。
+func runAppCreate(folder, displayName, description string) error {
+	appKey, err := deriveAppKey(folder)
+	if err != nil {
+		return err
+	}
+	manifest := newAppManifest(appKey, defaultName(displayName, appKey), description)
+
+	client, err := newClientFromProfile()
+	if err != nil {
+		return err
+	}
+
+	if err := assertScaffoldClear(folder); err != nil {
+		return err
+	}
+
+	if apiErr := client.CreateApp(manifest.Key, manifest.Name, manifest.Properties); apiErr != nil {
+		return apiErr
+	}
+
+	if err := writeScaffold(folder, manifest); err != nil {
+		return err
+	}
+
+	fmt.Printf("App '%s' created successfully\n", appKey)
+	prepareCodeRepos(appKey)
+	return nil
+}
+
+// deriveAppKey 从目录参数推导 appKey：取绝对路径的 basename，统一覆盖 `shop` / `.` / `..`。
+func deriveAppKey(folder string) (string, error) {
+	abs, err := filepath.Abs(folder)
+	if err != nil {
+		return "", fmt.Errorf("resolve '%s': %w", folder, err)
+	}
+	appKey := filepath.Base(abs)
+	if err := validResourceKey(appKey); err != nil {
+		return "", fmt.Errorf("directory name %q can't be an app key: %w", appKey, err)
+	}
+	return appKey, nil
+}
+
+// newAppManifest 构造 Make.App 清单（脚手架写文件与远端 CreateApp 共用，单一真相源）。
+// 空 description 不进 properties——保证 app.yaml 与远端无即时 diff 漂移。
+func newAppManifest(appKey, name, description string) ResourceManifest {
+	props := map[string]any{}
+	if description != "" {
+		props["description"] = description
+	}
+	return ResourceManifest{
+		Key:        appKey,
+		Name:       name,
+		Type:       "Make.App",
+		Meta:       map[string]any{"version": "1.0.0"},
+		Properties: props,
+	}
+}
+
+// assertScaffoldClear 前置检查脚手架目标文件均不存在——任一已存在即拒绝（提示删除重建）。
+// 与写出分离：在远端创建之前调用（只读 os.Stat，不动文件系统），
+// 避免「远端建好但本地拒绝」的反向半成品。
+func assertScaffoldClear(folder string) error {
+	targets := append(append([]string{}, scaffoldTemplates...), appDSLPath)
+	for _, name := range targets {
+		target := filepath.Join(folder, name)
+		if _, err := os.Stat(target); err == nil {
+			return fmt.Errorf("'%s' already exists; remove it and re-run", target)
+		}
+	}
+	return nil
+}
+
+// writeScaffold 写出本地工程骨架：CLAUDE.md / AGENTS.md（embed 模板）+ apps/dsl/app.yaml（DSL 种子）。
+// 假定目标已由 assertScaffoldClear 确认为空；仅在远端 App 创建成功后调用。
+func writeScaffold(folder string, manifest ResourceManifest) error {
+	if err := os.MkdirAll(folder, 0755); err != nil {
+		return fmt.Errorf("create '%s': %w", folder, err)
+	}
+	for _, name := range scaffoldTemplates {
+		data, err := agents.Templates.ReadFile(name + ".tmpl")
+		if err != nil {
+			return fmt.Errorf("read embedded %s: %w", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(folder, name), data, 0644); err != nil {
+			return err
+		}
+	}
+
+	dsl, err := renderAppDSL(manifest)
+	if err != nil {
+		return err
+	}
+	dslFull := filepath.Join(folder, appDSLPath)
+	if err := os.MkdirAll(filepath.Dir(dslFull), 0755); err != nil {
+		return fmt.Errorf("create '%s': %w", filepath.Dir(dslFull), err)
+	}
+	return os.WriteFile(dslFull, dsl, 0644)
+}
+
+// renderAppDSL 把清单序列化为人类可编辑的 app.yaml（2 空格缩进对齐 DSL 例子 + 顶部用法注释）。
+// 复用 ResourceManifest，使 create 写出的就是 apply/diff 能原样读回的 manifest。
+func renderAppDSL(manifest ResourceManifest) ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteString("# Make App DSL · edit then `makecli apply -f apps/dsl/app.yaml`\n")
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(manifest); err != nil {
+		return nil, err
+	}
+	_ = enc.Close()
+	return buf.Bytes(), nil
+}
+
+// ---------------------------------- 文件模式：仅远端 ----------------------------------
 
 func runAppCreateFromFile(path string) error {
 	manifest, err := loadAppManifestFromFile(path)
@@ -85,57 +212,18 @@ func runAppCreateFromFile(path string) error {
 	return nil
 }
 
-func runAppCreate(key, displayName, description string) error {
-	if err := validResourceKey(key); err != nil {
-		return err
-	}
-
-	client, err := newClientFromProfile()
-	if err != nil {
-		return err
-	}
-
-	// 展示名缺省时回退用 key
-	displayName = defaultName(displayName, key)
-
-	props := map[string]any{}
-	if description != "" {
-		props["description"] = description
-	}
-
-	if apiErr := client.CreateApp(key, displayName, props); apiErr != nil {
-		return apiErr
-	}
-
-	fmt.Printf("App '%s' created successfully\n", key)
-	prepareCodeRepos(key)
-	return nil
-}
+// ---------------------------------- 代码仓库准备 ----------------------------------
 
 // prepareCodeRepos 在 App 创建成功后幂等准备 preview/production 代码仓库。
-// 仓库服务故障不该把已成功的 App 创建报成失败——deploy 走同一个幂等接口会自动重试，
-// 这里只降级为 stderr 警告。
+// 成功静默——仓库地址只在 deploy 时才有意义，create 成功只打印一行 created。
+// 失败仅降级为 stderr 警告：deploy 走同一个幂等接口会自动重试，不该把已成功的
+// App 创建报成失败，但准备失败属于值得告知的错误信息，故仍输出到 stderr。
 func prepareCodeRepos(appKey string) {
 	client, _, err := newRepoClientFromProfile()
 	if err == nil {
-		var repo *api.CodeRepoResource
-		if repo, err = client.CreateRepository(appKey); err == nil {
-			printCodeRepos(repo)
+		if _, err = client.CreateRepository(appKey); err == nil {
 			return
 		}
 	}
 	fmt.Fprintf(os.Stderr, "warning: code repositories not ready: %v (deploy will retry automatically)\n", err)
-}
-
-// printCodeRepos 打印各环境仓库地址，单仓库兼容形态下两个环境显示同一地址
-func printCodeRepos(repo *api.CodeRepoResource) {
-	lines := ""
-	for _, env := range deployEnvs {
-		if url := repo.CloneURLFor(env); url != "" {
-			lines += fmt.Sprintf("  %-12s %s\n", env+":", url)
-		}
-	}
-	if lines != "" {
-		fmt.Print("Code repositories ready:\n" + lines)
-	}
 }
