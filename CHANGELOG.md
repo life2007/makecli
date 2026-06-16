@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.2] - 2026-06-16
+
+### Features
+
+- **app**: Confirm before `app delete` by typing the app key (gh `repo delete` style), with `--yes`/`-y` to skip; non-interactive shells are refused with guidance to pass `--yes`. Requires Go 1.25.8+ to build (huh v2)
+
 ## [v0.4.1] - 2026-06-16
 
 ### ⚠ Breaking Changes
@@ -101,7 +107,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Releases before v0.3.0 (v0.1.x–v0.2.x) predate this changelog. See the
 [GitHub releases](https://github.com/qfeius/makecli/releases) for their notes.
 
-[Unreleased]: https://github.com/qfeius/makecli/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/qfeius/makecli/compare/v0.4.2...HEAD
+[v0.4.2]: https://github.com/qfeius/makecli/releases/tag/v0.4.2
 [v0.4.1]: https://github.com/qfeius/makecli/releases/tag/v0.4.1
 [v0.4.0]: https://github.com/qfeius/makecli/releases/tag/v0.4.0
 [v0.3.4]: https://github.com/qfeius/makecli/releases/tag/v0.3.4
