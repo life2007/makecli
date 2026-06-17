@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.4] - 2026-06-17
+
+### ⚠ Breaking Changes
+
+- **deploy**: No longer auto-commits a worktree snapshot before pushing. `app deploy` now pushes the committed HEAD as-is and errors if the working tree is dirty, has no commits, or has no git repository — guiding you to commit first. Commit timing is handed back to the user
+
+### Features
+
+- **app**: Re-introduce `app init [appKey]` — scaffolds a complete local Make app project (`CLAUDE.md` / `AGENTS.md` / `apps/dsl/app.yaml` + `git init` + `.gitignore`), idempotent and remote-free. `app create` now shares the same scaffold core (`create` = `init` + remote registration + initial commit) and composes with a pre-existing `init` scaffold without clobbering edits
+- **api**: Inject W3C `traceparent` + `X-Log-Id` headers on outbound requests for distributed tracing
+- **login**: Add lark-cli-style progress messages to the browser OAuth flow
+
+### Bug Fixes
+
+- **deploy**: `gitSignature` reads the merged git config (LocalScope) so commits use the real user identity from `~/.gitconfig`, instead of only `/etc/gitconfig` (which almost always fell back to the `makecli` identity)
+
 ## [v0.4.3] - 2026-06-16
 
 ### Features
@@ -113,7 +129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Releases before v0.3.0 (v0.1.x–v0.2.x) predate this changelog. See the
 [GitHub releases](https://github.com/qfeius/makecli/releases) for their notes.
 
-[Unreleased]: https://github.com/qfeius/makecli/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/qfeius/makecli/compare/v0.4.4...HEAD
+[v0.4.4]: https://github.com/qfeius/makecli/releases/tag/v0.4.4
 [v0.4.3]: https://github.com/qfeius/makecli/releases/tag/v0.4.3
 [v0.4.2]: https://github.com/qfeius/makecli/releases/tag/v0.4.2
 [v0.4.1]: https://github.com/qfeius/makecli/releases/tag/v0.4.1
