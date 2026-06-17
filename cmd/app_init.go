@@ -1,9 +1,9 @@
 /**
- * [INPUT]: 依赖 cmd/git（initGitRepo / ensureGitignore）、fmt、github.com/spf13/cobra
+ * [INPUT]: 依赖 cmd/app_create（deriveAppKey/newAppManifest/writeScaffold/scaffoldOutputs）、cmd/git（initGitRepo/ensureGitignore）、fmt、github.com/spf13/cobra
  * [OUTPUT]: 对外提供 newAppInitCmd 函数；包内 runAppInit
- * [POS]: cmd/app 的 init 子命令——把一个普通目录变成可部署的 app 仓库形态：git init（幂等）+ .gitignore 增量补齐。
- *        刻意不 commit（提交时机交还用户），也不要求 apps/dsl/app.yaml 存在（init 是通用 git 形态命令）。
- *        被 app create 末尾复用其内核（initGitRepo + ensureGitignore）后再做 initial commit；deploy 的 openRepo 门控依赖此命令先行建仓。
+ * [POS]: cmd/app 的 init 子命令——把一个目录变成完整的本地 Make app 项目：写脚手架（CLAUDE.md/AGENTS.md/apps/dsl/app.yaml）+ git init + .gitignore。
+ *        与 create 共享同一脚手架内核（writeScaffold + initGitRepo + ensureGitignore），create = init 核心 + 远端注册 + initial commit。
+ *        可选位置参数 [appKey]（兼目录名，deriveAppKey 推导，缺省取 cwd 名）；全程幂等 skip-if-exists，刻意不 commit、不碰远端。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -17,44 +17,63 @@ import (
 
 func newAppInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "init [dir]",
-		Short: "Initialize git repo and .gitignore for an app (idempotent)",
+		Use:   "init [appKey]",
+		Short: "Scaffold a local Make app project (files + git, idempotent, no remote)",
 		Example: `  makecli app init
-  makecli app init ./shop`,
+  makecli app init shop`,
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir := "."
+			target := "."
 			if len(args) == 1 {
-				dir = args[0]
+				target = args[0]
 			}
-			return runAppInit(dir)
+			return runAppInit(target)
 		},
 	}
 	return cmd
 }
 
-// runAppInit 在 dir 幂等建立 git 仓库并补齐 .gitignore，逐项打印状态。
-// 两步都幂等：已是仓库则跳过 init，.gitignore 已全则不改——重复运行安全。
-func runAppInit(dir string) error {
-	created, err := initGitRepo(dir)
+// runAppInit 在 target 目录幂等长出完整本地项目骨架并初始化 git，逐项打印状态。
+// appKey 由 target 推导（缺省=cwd 名，validResourceKey 把关），name 默认回退 key、无 description——
+// 这些都可在生成的 app.yaml 里编辑。全程 skip-if-exists + 不 commit，重复运行安全。
+func runAppInit(target string) error {
+	appKey, err := deriveAppKey(target)
 	if err != nil {
 		return err
 	}
-	if created {
-		fmt.Println("git:        initialized")
-	} else {
-		fmt.Println("git:        already a repository")
+	manifest := newAppManifest(appKey, appKey, "")
+
+	created, err := writeScaffold(target, manifest)
+	if err != nil {
+		return err
+	}
+	madeNew := map[string]bool{}
+	for _, f := range created {
+		madeNew[f] = true
+	}
+	for _, out := range scaffoldOutputs() {
+		fmt.Printf("%-22s %s\n", out, statusWord(madeNew[out], "created", "exists"))
 	}
 
-	changed, err := ensureGitignore(dir)
+	gitCreated, err := initGitRepo(target)
 	if err != nil {
 		return err
 	}
-	if changed {
-		fmt.Println(".gitignore: updated")
-	} else {
-		fmt.Println(".gitignore: already complete")
+	fmt.Printf("%-22s %s\n", "git", statusWord(gitCreated, "initialized", "already a repository"))
+
+	changed, err := ensureGitignore(target)
+	if err != nil {
+		return err
 	}
+	fmt.Printf("%-22s %s\n", ".gitignore", statusWord(changed, "updated", "already complete"))
 	return nil
+}
+
+// statusWord 把布尔变更挑成「动作发生 / 已就绪」两个词，消除调用点的 if/else。
+func statusWord(changed bool, yes, no string) string {
+	if changed {
+		return yes
+	}
+	return no
 }

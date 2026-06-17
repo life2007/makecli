@@ -1,11 +1,11 @@
 /**
  * [INPUT]: 依赖 cmd/client（newClientFromProfile/newRepoClientFromProfile）、cmd/app（loadAppManifestFromFile、validResourceKey、defaultName）、cmd/apply（ResourceManifest）、cmd/git（initGitRepo/ensureGitignore/stageAndCommit）、agents（embed 模板）、bytes、fmt、os、path/filepath、github.com/go-git/go-git/v5、gopkg.in/yaml.v3、github.com/spf13/cobra
- * [OUTPUT]: 对外提供 newAppCreateCmd 函数；包内 runAppCreate / assertScaffoldClear / writeScaffold / scaffoldGit / renderAppDSL / newAppManifest / deriveAppKey
- * [POS]: cmd/app 的 create 子命令——一条命令完成 本地脚手架 + 远端 App + git 仓库 + 代码仓库。
+ * [OUTPUT]: 对外提供 newAppCreateCmd 函数；包内 runAppCreate / writeScaffold / scaffoldOutputs / fileExists / scaffoldGit / renderAppDSL / newAppManifest / deriveAppKey（writeScaffold/scaffoldOutputs/deriveAppKey/newAppManifest 被 app_init 复用）
+ * [POS]: cmd/app 的 create 子命令——= app init 本地脚手架内核 + 远端 App 注册 + initial commit + 代码仓库。
  *        位置参数 <appKey> 同时是「目录名 + key」（filepath.Base(filepath.Abs(arg)) 推导，`.`/`..` 隐藏便利），
  *        validResourceKey 把关；写 CLAUDE.md/AGENTS.md（embed 模板，scaffoldFile 映射 embed→out 名）+ apps/dsl/app.yaml（ResourceManifest 序列化，与 apply/diff 同结构往返）；
- *        执行序「远端先行」：存在性预检(assertScaffoldClear,只读)→CreateApp→writeScaffold→scaffoldGit(init+.gitignore+initial commit)→prepareCodeRepos，远端失败时本地零残留，重跑干净；本地/远端冲突即拒绝（提示删除重建）；
- *        scaffoldGit 复用 app init 内核再加一次 initial commit，使 create 产物即干净可 deploy；git 失败降级 stderr 警告（不阻断已成功的远端创建）；
+ *        执行序「远端先行」：加载凭证→CreateApp→writeScaffold(幂等 skip-if-exists)→scaffoldGit(init+.gitignore+initial commit)→prepareCodeRepos，新目录远端失败时本地零残留、重跑干净；
+ *        writeScaffold 幂等故 create 可与 init 组合（先 init 本地、再 create 补远端，不再硬拒已存在文件）；scaffoldGit 复用 init 内核再加 initial commit→create 产物即干净可 deploy；git 失败降级 stderr 警告（不阻断已成功的远端创建）；
  *        prepareCodeRepos 成功静默（仅 deploy 关心仓库地址），失败降级为 stderr 警告；-f 文件模式仅建远端不脚手架
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -70,10 +70,10 @@ func newAppCreateCmd() *cobra.Command {
 
 // ---------------------------------- 脚手架模式：本地 + 远端 + 仓库 ----------------------------------
 
-// runAppCreate 执行合并后的 create：解析 appKey → 加载凭证 → 本地存在性预检 → 远端创建 → 写本地脚手架 → 准备仓库。
+// runAppCreate = app init 核心 + 远端注册 + initial commit：解析 appKey → 加载凭证 → 远端创建 → 写脚手架 → git init+gitignore+commit → 准备仓库。
 // 顺序刻意「远端先行」：token 失效 / 冲突 / 网络故障都在写任何本地文件之前报错，
 // 这样换 profile 或修复 token 后重跑是干净的，不会被上一次的半成品工程拦住。
-// 存在性预检（只读 os.Stat）又放在远端之前——目标已存在就尽早拒绝，避免白白创建远端 App。
+// 本地脚手架走幂等 skip-if-exists（与 app init 同一内核），故可与 init 组合：先 init 本地、再 create 补远端。
 func runAppCreate(folder, displayName, description string) error {
 	appKey, err := deriveAppKey(folder)
 	if err != nil {
@@ -86,15 +86,13 @@ func runAppCreate(folder, displayName, description string) error {
 		return err
 	}
 
-	if err := assertScaffoldClear(folder); err != nil {
-		return err
-	}
-
+	// 远端先行：坏 token / 冲突 / 网络故障都在写任何本地文件之前报错，
+	// 新目录失败时零残留、重跑干净；写本地走幂等 skip-if-exists，与 app init 同一脚手架内核。
 	if apiErr := client.CreateApp(manifest.Key, manifest.Name, manifest.Properties); apiErr != nil {
 		return apiErr
 	}
 
-	if err := writeScaffold(folder, manifest); err != nil {
+	if _, err := writeScaffold(folder, manifest); err != nil {
 		return err
 	}
 
@@ -162,48 +160,59 @@ func newAppManifest(appKey, name, description string) ResourceManifest {
 	}
 }
 
-// assertScaffoldClear 前置检查脚手架目标文件均不存在——任一已存在即拒绝（提示删除重建）。
-// 与写出分离：在远端创建之前调用（只读 os.Stat，不动文件系统），
-// 避免「远端建好但本地拒绝」的反向半成品。
-func assertScaffoldClear(folder string) error {
-	targets := []string{appDSLPath}
+// scaffoldOutputs 是脚手架写出文件的相对路径（顺序即 init 状态输出顺序，单一真相源）。
+func scaffoldOutputs() []string {
+	outs := make([]string, 0, len(scaffoldTemplates)+1)
 	for _, f := range scaffoldTemplates {
-		targets = append(targets, f.out)
+		outs = append(outs, f.out)
 	}
-	for _, name := range targets {
-		target := filepath.Join(folder, name)
-		if _, err := os.Stat(target); err == nil {
-			return fmt.Errorf("'%s' already exists; remove it and re-run", target)
-		}
-	}
-	return nil
+	return append(outs, appDSLPath)
 }
 
-// writeScaffold 写出本地工程骨架：CLAUDE.md / AGENTS.md（embed 模板）+ apps/dsl/app.yaml（DSL 种子）。
-// .gitignore 不在此——由 scaffoldGit 经 ensureGitignore 管理。假定目标已由 assertScaffoldClear 确认为空；仅在远端 App 创建成功后调用。
-func writeScaffold(folder string, manifest ResourceManifest) error {
+// writeScaffold 幂等写出本地工程骨架：CLAUDE.md / AGENTS.md（embed 模板）+ apps/dsl/app.yaml（DSL 种子）。
+// skip-if-exists——已存在的文件原样保留（不覆盖用户编辑），返回本次真正新建的文件清单（供 init 输出）。
+// .gitignore 不在此——由 ensureGitignore 管理。idempotent 是 init 与 create 共享同一脚手架内核的前提。
+func writeScaffold(folder string, manifest ResourceManifest) ([]string, error) {
 	if err := os.MkdirAll(folder, 0755); err != nil {
-		return fmt.Errorf("create '%s': %w", folder, err)
+		return nil, fmt.Errorf("create '%s': %w", folder, err)
 	}
+	var created []string
 	for _, f := range scaffoldTemplates {
+		target := filepath.Join(folder, f.out)
+		if fileExists(target) {
+			continue
+		}
 		data, err := agents.Templates.ReadFile(f.embed)
 		if err != nil {
-			return fmt.Errorf("read embedded %s: %w", f.embed, err)
+			return created, fmt.Errorf("read embedded %s: %w", f.embed, err)
 		}
-		if err := os.WriteFile(filepath.Join(folder, f.out), data, 0644); err != nil {
-			return err
+		if err := os.WriteFile(target, data, 0644); err != nil {
+			return created, err
 		}
+		created = append(created, f.out)
 	}
 
-	dsl, err := renderAppDSL(manifest)
-	if err != nil {
-		return err
-	}
 	dslFull := filepath.Join(folder, appDSLPath)
-	if err := os.MkdirAll(filepath.Dir(dslFull), 0755); err != nil {
-		return fmt.Errorf("create '%s': %w", filepath.Dir(dslFull), err)
+	if !fileExists(dslFull) {
+		dsl, err := renderAppDSL(manifest)
+		if err != nil {
+			return created, err
+		}
+		if err := os.MkdirAll(filepath.Dir(dslFull), 0755); err != nil {
+			return created, fmt.Errorf("create '%s': %w", filepath.Dir(dslFull), err)
+		}
+		if err := os.WriteFile(dslFull, dsl, 0644); err != nil {
+			return created, err
+		}
+		created = append(created, appDSLPath)
 	}
-	return os.WriteFile(dslFull, dsl, 0644)
+	return created, nil
+}
+
+// fileExists 是 skip-if-exists 的只读判定（os.Stat 成功即视为存在）。
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // renderAppDSL 把清单序列化为人类可编辑的 app.yaml（2 空格缩进对齐 DSL 例子 + 顶部用法注释）。

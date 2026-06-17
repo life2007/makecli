@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 cmd 包内的 runAppCreate/runAppCreateFromFile/assertScaffoldClear/writeScaffold/renderAppDSL/newAppManifest（包内白盒），internal/config、encoding/json、net/http、net/http/httptest、os、path/filepath
+ * [INPUT]: 依赖 cmd 包内的 runAppCreate/runAppCreateFromFile/writeScaffold/renderAppDSL/newAppManifest/assertDeployable（包内白盒），internal/config、github.com/go-git/go-git/v5、encoding/json、net/http、net/http/httptest、os、path/filepath
  * [OUTPUT]: 覆盖 app create 子命令核心逻辑的单元测试（脚手架 + 远端创建合并；成功静默 / 失败警告；含 -f 文件模式）
  * [POS]: cmd 模块 app_create.go 的配套测试，用 httptest 隔离网络、t.Setenv 隔离凭证、t.TempDir 隔离文件系统
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -69,12 +69,13 @@ func TestRenderAppDSL(t *testing.T) {
 // ---------------------------------- 本地脚手架 ----------------------------------
 
 func TestWriteScaffold(t *testing.T) {
-	// .gitignore 不再由 writeScaffold 写出（移交 scaffoldGit/ensureGitignore）
+	// .gitignore 不再由 writeScaffold 写出（移交 ensureGitignore）
 	scaffoldFiles := []string{"CLAUDE.md", "AGENTS.md", filepath.Join("apps", "dsl", "app.yaml")}
 
-	t.Run("creates agent files and app.yaml", func(t *testing.T) {
+	t.Run("creates agent files and app.yaml, reporting them as created", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := writeScaffold(dir, newAppManifest("shop", "shop", "")); err != nil {
+		created, err := writeScaffold(dir, newAppManifest("shop", "shop", ""))
+		if err != nil {
 			t.Fatalf("writeScaffold: %v", err)
 		}
 		for _, name := range scaffoldFiles {
@@ -82,11 +83,36 @@ func TestWriteScaffold(t *testing.T) {
 				t.Errorf("expected %s to exist: %v", name, err)
 			}
 		}
+		if len(created) != len(scaffoldFiles) {
+			t.Errorf("created = %v, want all %d scaffold files", created, len(scaffoldFiles))
+		}
+	})
+
+	t.Run("is idempotent: skips existing files, preserves edits", func(t *testing.T) {
+		dir := t.TempDir()
+		if _, err := writeScaffold(dir, newAppManifest("shop", "shop", "")); err != nil {
+			t.Fatalf("first writeScaffold: %v", err)
+		}
+		// 用户编辑其中一个文件
+		edited := filepath.Join(dir, "CLAUDE.md")
+		writeTestFile(t, edited, []byte("MY EDITS"))
+
+		created, err := writeScaffold(dir, newAppManifest("shop", "shop", ""))
+		if err != nil {
+			t.Fatalf("second writeScaffold: %v", err)
+		}
+		if len(created) != 0 {
+			t.Errorf("re-run should create nothing, got: %v", created)
+		}
+		data, _ := os.ReadFile(edited)
+		if string(data) != "MY EDITS" {
+			t.Errorf("user edits must be preserved, got: %q", data)
+		}
 	})
 
 	t.Run("creates nested folder if not exists", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "newapp")
-		if err := writeScaffold(dir, newAppManifest("newapp", "newapp", "")); err != nil {
+		if _, err := writeScaffold(dir, newAppManifest("newapp", "newapp", "")); err != nil {
 			t.Fatalf("writeScaffold: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "apps", "dsl", "app.yaml")); err != nil {
@@ -96,7 +122,7 @@ func TestWriteScaffold(t *testing.T) {
 
 	t.Run("app.yaml round-trips with the manifest", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := writeScaffold(dir, newAppManifest("shop", "商城", "")); err != nil {
+		if _, err := writeScaffold(dir, newAppManifest("shop", "商城", "")); err != nil {
 			t.Fatalf("writeScaffold: %v", err)
 		}
 		m, err := loadAppManifestFromFile(filepath.Join(dir, "apps", "dsl", "app.yaml"))
@@ -110,7 +136,7 @@ func TestWriteScaffold(t *testing.T) {
 
 	t.Run("AGENTS.md includes runtime build contract", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := writeScaffold(dir, newAppManifest("shop", "shop", "")); err != nil {
+		if _, err := writeScaffold(dir, newAppManifest("shop", "shop", "")); err != nil {
 			t.Fatalf("writeScaffold: %v", err)
 		}
 		data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -125,27 +151,6 @@ func TestWriteScaffold(t *testing.T) {
 		} {
 			if !strings.Contains(content, want) {
 				t.Errorf("AGENTS.md missing %q", want)
-			}
-		}
-	})
-}
-
-func TestAssertScaffoldClear(t *testing.T) {
-	t.Run("passes on an empty folder", func(t *testing.T) {
-		if err := assertScaffoldClear(t.TempDir()); err != nil {
-			t.Errorf("expected clear folder to pass: %v", err)
-		}
-	})
-
-	t.Run("refuses when a scaffold file already exists", func(t *testing.T) {
-		// .gitignore 不在预检之列——init 幂等增量管理，不做「存在即拒绝」
-		for _, existing := range []string{"CLAUDE.md", "AGENTS.md", filepath.Join("apps", "dsl", "app.yaml")} {
-			dir := t.TempDir()
-			target := filepath.Join(dir, existing)
-			_ = os.MkdirAll(filepath.Dir(target), 0755)
-			writeTestFile(t, target, []byte("x"))
-			if err := assertScaffoldClear(dir); err == nil {
-				t.Errorf("expected refusal when %s exists", existing)
 			}
 		}
 	})
@@ -343,24 +348,35 @@ func TestRunAppCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("refuses pre-existing local files without calling remote", func(t *testing.T) {
-		// 远端若被调用就让测试失败——证明存在性预检发生在远端创建之前
-		srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-			t.Error("remote must not be called when local files already exist")
-		}))
+	t.Run("composes with a pre-existing local scaffold (idempotent, no reject)", func(t *testing.T) {
+		srv := newMockMeta(t, 200, "create app success")
 		defer srv.Close()
 		t.Setenv("HOME", t.TempDir())
 		saveDefaultToken(t)
 		MetaServerURL = srv.URL
+		stubRepoServer(t, srv.URL)
 
-		folder := filepath.Join(t.TempDir(), "myapp")
-		if err := os.MkdirAll(folder, 0755); err != nil {
+		// 先用 init 内核铺一份本地脚手架并编辑——模拟「先 app init 本地、再 app create 补远端」
+		folder := filepath.Join(t.TempDir(), "shop")
+		if _, err := writeScaffold(folder, newAppManifest("shop", "shop", "")); err != nil {
 			t.Fatal(err)
 		}
-		writeTestFile(t, filepath.Join(folder, "CLAUDE.md"), []byte("x"))
+		edited := filepath.Join(folder, "CLAUDE.md")
+		writeTestFile(t, edited, []byte("MY EDITS"))
 
-		if err := runAppCreate(folder, "", ""); err == nil {
-			t.Fatal("expected refusal for pre-existing local files")
+		// create 不再硬拒已存在文件：补远端 + commit，且保留用户编辑
+		if err := runAppCreate(folder, "", ""); err != nil {
+			t.Fatalf("create should compose with a pre-existing scaffold: %v", err)
+		}
+		if data, _ := os.ReadFile(edited); string(data) != "MY EDITS" {
+			t.Errorf("create must not clobber user edits, got: %q", data)
+		}
+		repo, err := git.PlainOpen(folder)
+		if err != nil {
+			t.Fatalf("expected a git repo after compose: %v", err)
+		}
+		if err := assertDeployable(repo); err != nil {
+			t.Errorf("composed repo should be immediately deployable: %v", err)
 		}
 	})
 
