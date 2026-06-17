@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 bytes、encoding/json、fmt、io、mime/multipart、net/http、net/url、os、path/filepath、strconv
+ * [INPUT]: 依赖 bytes、encoding/json、fmt、io、mime/multipart、net/http、net/url、os、path/filepath、strconv，依赖 internal/trace 的 TraceID/Traceparent
  * [OUTPUT]: 对外提供 OCROptions 类型、Client.OCR(filename, reader, opts) 方法，返回 OCR 服务 data 字段（map[string]any，已递归剥除 position 坐标字段）
  * [POS]: internal/api 的 integration 子层，封装 Make Integration 服务（/integration/v1/ocr）的 HTTP 调用，与 client.go (Meta/Data) 平级
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/qfeius/makecli/internal/trace"
 )
 
 // ---------------------------------- OCR ----------------------------------
@@ -109,11 +111,16 @@ func (c *Client) OCR(filename string, content io.Reader, opts OCROptions) (map[s
 	}
 	contentType := mw.FormDataContentType()
 
+	// trace 头：与 do() 同源，trace-id 全程稳定，parent-id 每请求新生成
+	traceparent, logID := trace.Traceparent(), trace.TraceID()
+
 	if c.debug {
 		fmt.Fprintf(os.Stderr, "\n=== DEBUG: HTTP Request ===\n")
 		fmt.Fprintf(os.Stderr, "curl -X POST '%s' \\\n", endpoint)
 		fmt.Fprintf(os.Stderr, "  -H 'Content-Type: %s' \\\n", contentType)
 		fmt.Fprintf(os.Stderr, "  -H 'Authorization: Bearer %s' \\\n", c.token)
+		fmt.Fprintf(os.Stderr, "  -H 'Traceparent: %s' \\\n", traceparent)
+		fmt.Fprintf(os.Stderr, "  -H 'X-Log-Id: %s' \\\n", logID)
 		for k, v := range c.headers {
 			fmt.Fprintf(os.Stderr, "  -H '%s: %s' \\\n", k, v)
 		}
@@ -133,6 +140,8 @@ func (c *Client) OCR(filename string, content io.Reader, opts OCROptions) (map[s
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Traceparent", traceparent)
+	req.Header.Set("X-Log-Id", logID)
 	for k, v := range c.headers {
 		req.Header.Set(k, v)
 	}

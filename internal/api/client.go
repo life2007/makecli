@@ -1,5 +1,5 @@
 /**
- * [INPUT]: 依赖 bytes、encoding/json、errors、fmt、net/http、time
+ * [INPUT]: 依赖 bytes、encoding/json、errors、fmt、net/http、os、time，依赖 internal/trace 的 TraceID/Traceparent
  * [OUTPUT]: 对外提供 Client 类型、ErrNotFound 哨兵错误、Option / WithDebug / WithHeaders 功能选项、New 构造函数、App / Field / Entity / EntityProperties / RelationEnd / RelationProperties / Relation / Schema 类型、CreateApp(key, name, properties) / ListApps(page, size, filter) / DeleteApp(key) / GetApp(key) / CreateEntity(key, name, appKey, fields) / ListEntities(appKey, page, size, filter) / GetEntity(appKey, key) / UpdateEntity / DeleteEntity / CreateRelation(key, name, appKey, props) / UpdateRelation / ListRelations(appKey, ...) / GetRelation(appKey, key) / DeleteRelation / GetSchema(appKey) 方法。资源以 Key 为唯一标识符（英数下划线），Name 为用户可见展示名（支持中文）。Get* 方法在资源确实不存在时返回 ErrNotFound（可用 errors.Is 判定），其余错误（传输/非 not-found 业务码/解码）原样返回
  * [POS]: internal/api 的核心，封装 Make Meta Service 的 HTTP 调用
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/qfeius/makecli/internal/trace"
 )
 
 // ---------------------------------- 哨兵错误 ----------------------------------
@@ -421,6 +423,9 @@ func (c *Client) do(target, path string, body, result any) error {
 		return fmt.Errorf("序列化请求失败: %w", err)
 	}
 
+	// trace 头：trace-id 全程稳定（X-Log-Id 与 traceparent 第二段一致），parent-id 每请求新生成
+	traceparent, logID := trace.Traceparent(), trace.TraceID()
+
 	// debug 模式：输出 curl 命令
 	if c.debug {
 		fmt.Fprintf(os.Stderr, "\n=== DEBUG: HTTP Request ===\n")
@@ -428,6 +433,8 @@ func (c *Client) do(target, path string, body, result any) error {
 		fmt.Fprintf(os.Stderr, "  -H 'Content-Type: application/json' \\\n")
 		fmt.Fprintf(os.Stderr, "  -H 'Authorization: Bearer %s' \\\n", c.token)
 		fmt.Fprintf(os.Stderr, "  -H 'X-Make-Target: %s' \\\n", target)
+		fmt.Fprintf(os.Stderr, "  -H 'Traceparent: %s' \\\n", traceparent)
+		fmt.Fprintf(os.Stderr, "  -H 'X-Log-Id: %s' \\\n", logID)
 		for k, v := range c.headers {
 			fmt.Fprintf(os.Stderr, "  -H '%s: %s' \\\n", k, v)
 		}
@@ -442,6 +449,8 @@ func (c *Client) do(target, path string, body, result any) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("X-Make-Target", target)
+	req.Header.Set("Traceparent", traceparent)
+	req.Header.Set("X-Log-Id", logID)
 	for k, v := range c.headers {
 		req.Header.Set(k, v)
 	}

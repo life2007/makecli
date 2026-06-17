@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 internal/api 包内的 Client（包内白盒），encoding/json、errors、net/http、net/http/httptest、testing
- * [OUTPUT]: 覆盖 Client.CreateApp / ListApps / DeleteApp / WithHeaders / WithDebug / GetApp / GetEntity / GetRelation（含 ErrNotFound 语义）的单元测试
+ * [OUTPUT]: 覆盖 Client.CreateApp / ListApps / DeleteApp / WithHeaders / WithDebug / GetApp / GetEntity / GetRelation（含 ErrNotFound 语义）/ Traceparent+X-Log-Id 出站头 的单元测试
  * [POS]: internal/api client.go 的配套测试，用 httptest 隔离网络
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -12,6 +12,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 )
 
@@ -171,6 +172,27 @@ func TestWithHeaders(t *testing.T) {
 	client := New(srv.URL, "test-token", WithHeaders(headers))
 	if err := client.CreateApp("test", "测试", nil); err != nil {
 		t.Fatalf("CreateApp with headers: %v", err)
+	}
+}
+
+// TestTraceHeaders 验证每个出站请求都带 W3C traceparent 与 X-Log-Id，
+// 且 X-Log-Id 等于 traceparent 的 trace-id 段（二者必须指向同一 trace）。
+func TestTraceHeaders(t *testing.T) {
+	re := regexp.MustCompile(`^00-([0-9a-f]{32})-([0-9a-f]{16})-01$`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tp := r.Header.Get("Traceparent")
+		m := re.FindStringSubmatch(tp)
+		if m == nil {
+			t.Errorf("Traceparent 不符合 W3C v00 格式: %q", tp)
+		} else if logID := r.Header.Get("X-Log-Id"); logID != m[1] {
+			t.Errorf("X-Log-Id %q != traceparent trace-id 段 %q", logID, m[1])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "msg": "ok"})
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL, "test-token").CreateApp("test", "测试", nil); err != nil {
+		t.Fatalf("CreateApp: %v", err)
 	}
 }
 
