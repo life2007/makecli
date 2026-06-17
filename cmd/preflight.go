@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 errors、fmt、os、path/filepath、github.com/spf13/cobra
  * [OUTPUT]: 对外提供 newPreflightCmd 函数、errPreflightFailed 哨兵错误
- * [POS]: cmd 模块的顶层 preflight 命令，按 --type（fullstack/service/ui，默认 fullstack）
+ * [POS]: cmd 模块的顶层 preflight 命令，按 --app-type（fullstack/service/ui，默认 fullstack）
  *        校验工作目录是否具备对应形态的 Make app 必需工程骨架——apps/dsl 是身份核心三形态必查，
  *        service / ui 按形态增减；任一缺失返回 errPreflightFailed（由 main.go 转译为退出码 1），
  *        作 CI / deploy 前置门禁
@@ -59,7 +59,7 @@ func newPreflightCmd() *cobra.Command {
 		Use:   "preflight [dir]",
 		Short: "Check the directory has a valid Make app project layout",
 		Long: `Preflight verifies the directory contains the required Make app skeleton
-for the chosen project type (--type, default fullstack):
+for the chosen project type (--app-type, default fullstack):
 
   fullstack  apps/dsl/ + apps/service/package.json + apps/ui/package.json
   service    apps/dsl/ + apps/service/package.json          (backend only)
@@ -70,7 +70,7 @@ Any missing entry fails the check (exit code 1), so it can gate CI or deploy.
 The directory defaults to the current working directory.`,
 		Example: `  makecli preflight
   makecli preflight ./my-app
-  makecli preflight --type service`,
+  makecli preflight --app-type service`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true, // 检查未过返回 errPreflightFailed 仅作退出码信号，不打印 error: 行
@@ -82,7 +82,7 @@ The directory defaults to the current working directory.`,
 			return reportPreflightError(cmd, runPreflight(root, projectType))
 		},
 	}
-	cmd.Flags().StringVar(&projectType, "type", "fullstack", "project type: fullstack (ui+service), service (service only), ui (ui only)")
+	cmd.Flags().StringVar(&projectType, "app-type", "fullstack", "project type: fullstack (ui+service), service (service only), ui (ui only)")
 	return cmd
 }
 
@@ -100,7 +100,7 @@ func reportPreflightError(cmd *cobra.Command, err error) error {
 func runPreflight(root, projectType string) error {
 	layout, ok := layoutByType[projectType]
 	if !ok {
-		return fmt.Errorf("invalid --type %q: must be fullstack, service, or ui", projectType)
+		return fmt.Errorf("invalid --app-type %q: must be fullstack, service, or ui", projectType)
 	}
 
 	display := root

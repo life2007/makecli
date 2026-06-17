@@ -115,7 +115,7 @@ func TestRunPreflight(t *testing.T) {
 		}
 	})
 
-	// --type service: 只查 dsl + service，缺 ui 不影响通过
+	// --app-type service: 只查 dsl + service，缺 ui 不影响通过
 	t.Run("service type ignores missing ui", func(t *testing.T) {
 		root := mkValidLayout(t)
 		if err := os.RemoveAll(filepath.Join(root, "apps", "ui")); err != nil {
@@ -144,7 +144,7 @@ func TestRunPreflight(t *testing.T) {
 		}
 	})
 
-	// --type ui: 只查 dsl + ui，缺 service 不影响通过
+	// --app-type ui: 只查 dsl + ui，缺 service 不影响通过
 	t.Run("ui type ignores missing service", func(t *testing.T) {
 		root := mkValidLayout(t)
 		if err := os.RemoveAll(filepath.Join(root, "apps", "service")); err != nil {
@@ -166,7 +166,7 @@ func TestRunPreflight(t *testing.T) {
 		if err == nil || errors.Is(err, errPreflightFailed) {
 			t.Errorf("expected a plain invalid-type error, got %v", err)
 		}
-		if !strings.Contains(err.Error(), "invalid --type") {
+		if !strings.Contains(err.Error(), "invalid --app-type") {
 			t.Errorf("error should name the offending flag: %v", err)
 		}
 	})
