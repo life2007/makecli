@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.6] - 2026-06-18
+
+### Features
+
+- **dry-run**: Add `--dry-run` to the create commands (`app` / `entity` / `relation` / `record create`), injecting an `X-Dry-Run` header so the backend runs the real validation but rolls back instead of persisting — answers "would this create succeed?" with no side effects. `app create --dry-run` short-circuits before any local scaffold, `git init`, or repo prep; the header is only sent on write operations, never on reads
+
+### Refactor
+
+- **preflight**: Rename the `--type` flag to `--app-type`
+
 ## [v0.4.5] - 2026-06-17
 
 ### Features
@@ -137,7 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Releases before v0.3.0 (v0.1.x–v0.2.x) predate this changelog. See the
 [GitHub releases](https://github.com/qfeius/makecli/releases) for their notes.
 
-[Unreleased]: https://github.com/qfeius/makecli/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/qfeius/makecli/compare/v0.4.6...HEAD
+[v0.4.6]: https://github.com/qfeius/makecli/releases/tag/v0.4.6
 [v0.4.5]: https://github.com/qfeius/makecli/releases/tag/v0.4.5
 [v0.4.4]: https://github.com/qfeius/makecli/releases/tag/v0.4.4
 [v0.4.3]: https://github.com/qfeius/makecli/releases/tag/v0.4.3
