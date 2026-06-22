@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 internal/config（Load/LoadConfig/LoadSettings/LookupEnvironment）、internal/api（New/Option/WithDebug/WithHeaders）、fmt、strings；从 root.go 读取全局 Profile / MetaServerURL / RepoServerURL / Environment / DebugMode
- * [OUTPUT]: 对外提供 newClientFromProfile（变参 ...api.Option）/ newRepoClientFromProfile / resolveEnvironment 函数、withGateway helper、apiGatewayPath 常量
+ * [OUTPUT]: 对外提供 newClientFromProfile（变参 ...api.Option）/ newRepoClientFromProfile / resolveEnvironment / envName 函数、withGateway helper、apiGatewayPath 常量
  * [POS]: cmd 模块的公共 helper，统一「全局命令行入参 → API 客户端」的构建逻辑——profile / server / env / debug 全部由 root PersistentFlag 注入，子命令零参数调用；
  *        newClientFromProfile 收 ...api.Option 变参，把每命令横切选项（如 WithDryRun）追加到基础选项之后，写命令按需注入；
  *        resolveProfile 收口凭证与配置解析，resolveEnvironment 收口环境 preset；URL 取值链：flag > profile config > 环境 preset，主机基址再经 withGateway 补网关前缀 /api/make
@@ -73,6 +73,19 @@ func withGateway(host string) string {
 		return host
 	}
 	return host + apiGatewayPath
+}
+
+// envName 解析当前后端环境名：--env flag > [settings] environment > 默认 dev。
+// 与 resolveEnvironment 同一解析链，但 fail-safe：吞掉 LoadSettings 错误回退默认，
+// 供纯展示场景（如鉴权失败引导回显环境）使用——展示不该因配置读取失败而无名可显。
+func envName() string {
+	if Environment != "" {
+		return Environment
+	}
+	if s, err := config.LoadSettings(); err == nil && s.Environment != "" {
+		return s.Environment
+	}
+	return config.DefaultEnvironment
 }
 
 // resolveEnvironment 解析当前后端环境 preset：--env flag > [settings] environment > DefaultEnvironment。

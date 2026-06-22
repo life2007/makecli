@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 internal/api 包内的 Client（包内白盒），encoding/json、errors、net/http、net/http/httptest、testing
- * [OUTPUT]: 覆盖 Client.CreateApp / ListApps / DeleteApp / WithHeaders / WithDebug / WithDryRun（X-Dry-Run 注入/缺席）/ GetApp / GetEntity / GetRelation（含 ErrNotFound 语义）/ Traceparent+X-Log-Id 出站头 的单元测试
+ * [OUTPUT]: 覆盖 Client.CreateApp / ListApps / DeleteApp / WithHeaders / WithDebug / WithDryRun（X-Dry-Run 注入/缺席）/ GetApp / GetEntity / GetRelation（含 ErrNotFound 语义）/ ErrAuthFailed 鉴权语义 / Traceparent+X-Log-Id 出站头 的单元测试
  * [POS]: internal/api client.go 的配套测试，用 httptest 隔离网络
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -255,6 +256,35 @@ func newGetServer(t *testing.T, status int, body string) *httptest.Server {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
+}
+
+func TestAuthFailedSemantics(t *testing.T) {
+	t.Run("auth-failed code returns ErrAuthFailed", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":990300403,"msg":"token验证失败"}`)
+		defer srv.Close()
+
+		_, _, err := New(srv.URL, "bad-token").ListApps(1, 10, "")
+		if !errors.Is(err, ErrAuthFailed) {
+			t.Fatalf("expected ErrAuthFailed, got %v", err)
+		}
+		// 原始 code/msg 须保留供上层展示（cmd 层引导文案首行复用它）
+		if !strings.Contains(err.Error(), "990300403") || !strings.Contains(err.Error(), "token验证失败") {
+			t.Errorf("error should preserve code/msg, got %q", err.Error())
+		}
+	})
+
+	t.Run("non-auth 500 is NOT ErrAuthFailed", func(t *testing.T) {
+		srv := newGetServer(t, http.StatusOK, `{"code":500,"msg":"boom"}`)
+		defer srv.Close()
+
+		_, _, err := New(srv.URL, "test-token").ListApps(1, 10, "")
+		if err == nil {
+			t.Fatal("expected error on 500")
+		}
+		if errors.Is(err, ErrAuthFailed) {
+			t.Fatalf("500 must not map to ErrAuthFailed, got %v", err)
+		}
+	})
 }
 
 func TestGetAppNotFoundSemantics(t *testing.T) {

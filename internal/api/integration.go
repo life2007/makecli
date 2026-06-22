@@ -161,6 +161,9 @@ func (c *Client) OCR(filename string, content io.Reader, opts OCROptions) (map[s
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("无效的响应格式: %w", err)
 	}
+	if result.Code == authFailedCode {
+		return nil, authFailedErr(result.Code, result.Message)
+	}
 	if result.Code != 200 {
 		return nil, fmt.Errorf("API 错误 [%d]: %s", result.Code, result.Message)
 	}

@@ -23,7 +23,7 @@ import (
 
 // errPreflightFailed 表示工程骨架检查未通过。沿 cobra RunE 链向上返回，
 // 由 main.go 转译为退出码 1，使 CI / deploy 能据此门禁；它不是执行失败，
-// 故 preflight 命令静默其错误消息（SilenceErrors），避免污染 stderr。
+// 故 reportExecuteError（单一错误出口）放过它不打印 error: 行。
 var errPreflightFailed = errors.New("preflight: project layout check failed")
 
 // ---------------------------------- 必需骨架 ----------------------------------
@@ -71,28 +71,18 @@ The directory defaults to the current working directory.`,
 		Example: `  makecli preflight
   makecli preflight ./my-app
   makecli preflight --app-type service`,
-		Args:          cobra.MaximumNArgs(1),
-		SilenceUsage:  true,
-		SilenceErrors: true, // 检查未过返回 errPreflightFailed 仅作退出码信号，不打印 error: 行
+		Args:         cobra.MaximumNArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := "."
 			if len(args) == 1 {
 				root = args[0]
 			}
-			return reportPreflightError(cmd, runPreflight(root, projectType))
+			return runPreflight(root, projectType)
 		},
 	}
 	cmd.Flags().StringVar(&projectType, "app-type", "fullstack", "project type: fullstack (ui+service), service (service only), ui (ui only)")
 	return cmd
-}
-
-// reportPreflightError 在命令开启 SilenceErrors 的前提下亲自打印真实错误到 stderr，
-// 但放过 errPreflightFailed 哨兵——它仅用于把「检查未过」翻译成非零退出码。
-func reportPreflightError(cmd *cobra.Command, err error) error {
-	if err != nil && !errors.Is(err, errPreflightFailed) {
-		cmd.PrintErrln(cmd.ErrPrefix(), err.Error())
-	}
-	return err
 }
 
 // runPreflight 按 projectType 选定必需骨架，逐项 stat 打印 ✓ / ✗ 清单。

@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 github.com/spf13/cobra、github.com/spf13/pflag、os、strings、internal/config（EnvironmentNames/DefaultEnvironment）、internal/notifier
  * [OUTPUT]: 对外提供 Execute 函数、rootCmd 根命令、全局变量 Profile / MetaServerURL / RepoServerURL / Environment / DebugMode；包内 commandName 解析器
- * [POS]: cmd 模块的入口，挂载 version / configure / login / app / entity / relation / record / apply / diff / update / schema / integration / preflight 子命令；定义全局 --profile / --meta-server-url / --repo-server-url / --env / --debug PersistentFlag；后端 URL 兜底交给 config.Environment preset
+ * [POS]: cmd 模块的入口，挂载 version / configure / login / app / entity / relation / record / apply / diff / update / schema / integration / preflight 子命令；定义全局 --profile / --meta-server-url / --repo-server-url / --env / --debug PersistentFlag；后端 URL 兜底交给 config.Environment preset；错误呈现经 reportExecuteError 单一出口（SilenceErrors，见 errors.go）
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -87,7 +87,9 @@ func Execute(version, buildDate string) error {
 	rootCmd.Version = formatVersion(version, buildDate)
 	rootCmd.SetVersionTemplate(`{{.Version}}`)
 	rootCmd.SetUsageTemplate(usageTemplate)
-	rootCmd.SetErrPrefix("error:")
+	// 错误呈现收口到 Execute 出口的 reportExecuteError 单一出口：
+	// 抑制 cobra 自动打印，让鉴权失败能升级为引导、退出码哨兵能保持静默。
+	rootCmd.SilenceErrors = true
 	rootCmd.PersistentFlags().BoolVar(&DebugMode, "debug", false, "enable debug mode to show curl output")
 	_ = rootCmd.PersistentFlags().MarkHidden("debug")
 	rootCmd.PersistentFlags().StringVar(&MetaServerURL, "meta-server-url", "", "Meta Server base URL (overrides profile config and environment default)")
@@ -110,6 +112,7 @@ func Execute(version, buildDate string) error {
 	n := notifier.Start()
 	err := rootCmd.Execute()
 	n.Finish(commandName(rootCmd, os.Args[1:]))
+	reportExecuteError(os.Stderr, err)
 	return err
 }
 

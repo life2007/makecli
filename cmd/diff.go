@@ -24,7 +24,7 @@ import (
 
 // errDiffFound 表示检测到差异（drift）。它沿 cobra RunE 链向上返回，
 // 由 main.go 转译为退出码 1，使 CI 能据此门禁；不属于真正的执行失败，
-// 故 diff 命令静默其错误消息（SilenceErrors），避免污染 stderr。
+// 故 reportExecuteError（单一错误出口）放过它不打印 error: 行。
 var errDiffFound = errors.New("diff: differences found")
 
 // ---------------------------------- 命令定义 ----------------------------------
@@ -40,11 +40,10 @@ func newDiffCmd() *cobra.Command {
 The app name is inferred from the Make.App manifest or entity's app field in the YAML files.`,
 		Example: `  makecli diff -f ./dsl/
   makecli diff -f app.yaml --output json`,
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true, // 有差异时返回 errDiffFound 仅作退出码信号，不打印 error: 行
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return reportDiffError(cmd, runDiff(path, output))
+			return runDiff(path, output)
 		},
 	}
 
@@ -52,16 +51,6 @@ The app name is inferred from the Make.App manifest or entity's app field in the
 	cmd.Flags().StringVar(&output, "output", outputTable, "output format (table|json)")
 	_ = cmd.MarkFlagRequired("file")
 	return cmd
-}
-
-// reportDiffError 在 diff 命令开启 SilenceErrors 的前提下，亲自打印真实错误到 stderr，
-// 但放过 errDiffFound 哨兵——它不是错误，仅用于把「检测到差异」翻译成非零退出码。
-// 原样透传 err 给上层，由 main 决定退出码。
-func reportDiffError(cmd *cobra.Command, err error) error {
-	if err != nil && !errors.Is(err, errDiffFound) {
-		cmd.PrintErrln(cmd.ErrPrefix(), err.Error())
-	}
-	return err
 }
 
 // ---------------------------------- Diff 数据类型 ----------------------------------

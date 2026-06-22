@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 bytes、encoding/json、errors、fmt、net/http、os、time，依赖 internal/trace 的 TraceID/Traceparent
- * [OUTPUT]: 对外提供 Client 类型、ErrNotFound 哨兵错误、Option / WithDebug / WithHeaders / WithDryRun 功能选项、New 构造函数、App / Field / Entity / EntityProperties / RelationEnd / RelationProperties / Relation / Schema 类型、CreateApp(key, name, properties) / ListApps(page, size, filter) / DeleteApp(key) / GetApp(key) / CreateEntity(key, name, appKey, fields) / ListEntities(appKey, page, size, filter) / GetEntity(appKey, key) / UpdateEntity / DeleteEntity / CreateRelation(key, name, appKey, props) / UpdateRelation / ListRelations(appKey, ...) / GetRelation(appKey, key) / DeleteRelation / GetSchema(appKey) 方法。资源以 Key 为唯一标识符（英数下划线），Name 为用户可见展示名（支持中文）。Get* 方法在资源确实不存在时返回 ErrNotFound（可用 errors.Is 判定），其余错误（传输/非 not-found 业务码/解码）原样返回
+ * [OUTPUT]: 对外提供 Client 类型、ErrNotFound / ErrAuthFailed 哨兵错误、Option / WithDebug / WithHeaders / WithDryRun 功能选项、New 构造函数、App / Field / Entity / EntityProperties / RelationEnd / RelationProperties / Relation / Schema 类型、CreateApp(key, name, properties) / ListApps(page, size, filter) / DeleteApp(key) / GetApp(key) / CreateEntity(key, name, appKey, fields) / ListEntities(appKey, page, size, filter) / GetEntity(appKey, key) / UpdateEntity / DeleteEntity / CreateRelation(key, name, appKey, props) / UpdateRelation / ListRelations(appKey, ...) / GetRelation(appKey, key) / DeleteRelation / GetSchema(appKey) 方法。资源以 Key 为唯一标识符（英数下划线），Name 为用户可见展示名（支持中文）。Get* 方法在资源确实不存在时返回 ErrNotFound（可用 errors.Is 判定），其余错误（传输/非 not-found 业务码/解码）原样返回
  * [POS]: internal/api 的核心，封装 Make Meta Service 的 HTTP 调用
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -29,6 +30,21 @@ var ErrNotFound = errors.New("资源不存在")
 
 // notFoundCode 是 Meta Server 表示资源不存在的业务错误码
 const notFoundCode = 404
+
+// ErrAuthFailed 表示后端拒绝了本次请求的凭证（token 无效 / 过期 / 与环境不匹配）。
+// 它把横切的"鉴权失败"语义从散落各处的 (code, msg) 里解放出来，
+// 让 cmd 层用 errors.Is(err, api.ErrAuthFailed) 统一翻译成 `makecli login` 引导。
+// 与 ErrNotFound 同为包级哨兵，是 api 层"只报事实、不管呈现"的分层边界。
+var ErrAuthFailed = errors.New("鉴权失败")
+
+// authFailedCode 是后端表示鉴权失败的业务错误码。
+// 后端无公开错误码表，此处仅收录已知的 token 验证失败码；如有其它鉴权码段，在此扩展。
+const authFailedCode = 990300403
+
+// authFailedErr 是 ErrAuthFailed 的单一构造点：以 %w 包裹哨兵并保留原始 code/msg 供上层展示。
+func authFailedErr(code int, message string) error {
+	return fmt.Errorf("%w [%d]: %s", ErrAuthFailed, code, message)
+}
 
 // ---------------------------------- 客户端 ----------------------------------
 
@@ -475,7 +491,20 @@ func (c *Client) do(target, path string, body, result any) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+	// 鉴权失败是横切错误：轻量探针先读 code，命中鉴权码即抛 ErrAuthFailed 哨兵，
+	// 让 cmd 层统一翻译成 `makecli login` 引导，无需各方法各自识别。
+	var probe struct {
+		Code    int    `json:"code"`
+		Message string `json:"msg"`
+	}
+	if json.Unmarshal(raw, &probe) == nil && probe.Code == authFailedCode {
+		return authFailedErr(probe.Code, probe.Message)
+	}
+	if err := json.Unmarshal(raw, result); err != nil {
 		return fmt.Errorf("无效的响应格式: %w", err)
 	}
 	return nil

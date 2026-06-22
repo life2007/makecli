@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 internal/api 包内的 Client.OCR / OCROptions（包内白盒），encoding/json、io、mime、mime/multipart、net/http、net/http/httptest、strings、testing
- * [OUTPUT]: 覆盖 Client.OCR 的单元测试（multipart 字段断言 / query 参数断言 / verify_vat 三态 / API 错误 / 网络错误）
+ * [OUTPUT]: 覆盖 Client.OCR 的单元测试（multipart 字段断言 / query 参数断言 / verify_vat 三态 / API 错误 / ErrAuthFailed 鉴权语义 / 网络错误）
  * [POS]: internal/api 模块 integration.go 的配套测试，用 httptest 隔离网络
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -9,6 +9,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -208,6 +209,19 @@ func TestClientOCR(t *testing.T) {
 		c := New(srv.URL, "tok")
 		if _, err := c.OCR("x.png", strings.NewReader("x"), OCROptions{}); err == nil {
 			t.Fatal("expected API error")
+		}
+	})
+
+	t.Run("returns ErrAuthFailed on auth code", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 990300403, "msg": "token验证失败"})
+		}))
+		defer srv.Close()
+
+		c := New(srv.URL, "bad-token")
+		_, err := c.OCR("x.png", strings.NewReader("x"), OCROptions{})
+		if !errors.Is(err, ErrAuthFailed) {
+			t.Fatalf("expected ErrAuthFailed, got %v", err)
 		}
 	})
 
