@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 internal/api 包内的 Client（包内白盒），encoding/json、errors、net/http、net/http/httptest、testing
- * [OUTPUT]: 覆盖 Client.CreateApp / ListApps / DeleteApp（含成功 data 为标量 true 的写路径）/ GetAppDeletionStatus（GET 路径、角色、鉴权与状态）/ writeStatusErr（409 按 data 形态分流：带 constraint 才是唯一性冲突，其余原样回 msg）/ WithAppRole（?appRole= 注入 / 续接 / 缺席）/ RoleForEnv（与 HostedEnv 互逆）/ WithHeaders / WithDebug / WithDryRun（X-Dry-Run 注入/缺席）/ GetApp / GetEntity / GetRelation（含 ErrNotFound 语义）/ ErrAuthFailed 鉴权语义 / Traceparent+X-Log-Id 出站头 的单元测试
+ * [OUTPUT]: 验证 X-Make-Source: cli 出站标识；覆盖 Client.CreateApp / ListApps / DeleteApp（含成功 data 为标量 true 的写路径）/ GetAppDeletionStatus（GET 路径、角色、鉴权与状态）/ writeStatusErr（409 按 data 形态分流：带 constraint 才是唯一性冲突，其余原样回 msg）/ WithAppRole（?appRole= 注入 / 续接 / 缺席）/ RoleForEnv（与 HostedEnv 互逆）/ WithHeaders / WithDebug / WithDryRun（X-Dry-Run 注入/缺席）/ GetApp / GetEntity / GetRelation（含 ErrNotFound 语义）/ ErrAuthFailed 鉴权语义 / Traceparent+X-Log-Id 出站头 的单元测试
  * [POS]: internal/api client.go 的配套测试，用 httptest 隔离网络；覆盖可判别的 409 和删除状态响应码
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package api
@@ -210,6 +210,24 @@ func TestListApps(t *testing.T) {
 			t.Errorf("expected empty result, got apps=%d total=%d", len(apps), total)
 		}
 	})
+}
+
+func TestMakeSourceHeader(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("X-Make-Source"); got != "cli" {
+					t.Errorf("X-Make-Source = %q, want cli", got)
+				}
+				_, _ = w.Write([]byte(`{"code":200}`))
+			}))
+			defer srv.Close()
+			var result map[string]any
+			if err := New(srv.URL, "tok").request(method, "", "/", nil, &result); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestWithHeaders(t *testing.T) {

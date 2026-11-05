@@ -21,4 +21,6 @@ keyless 本地 agent（隐藏子命令 `makecli agent run` 的执行层，agent-
 - `render.go`: runRenderer（行式渲染：assistant 文本按 partial 水位差增量直写、⚙ 工具行、结果截断预览[首 3 行/200 字符，IsError 红 ✗ 前缀]、turn 边界空行、TurnEnd 采集终结失败进 runErr 不打印）、supportsColor（out 是否终端，管道/测试 buffer 保持纯文本）与 errorMark（✗ 前缀，工具结果与本地直通共用）、toolCallSummary（bash→command/文件工具→path/搜索→pattern，确认提示复用）、previewLines/truncateOneLine
 - `code_test.go`: 覆盖 code agent 编排（无头文本轮含 system/AGENTS.md/7 工具声明线缆、read 工具回喂轮、未信任 bash 拦截 + --approve 放行、REPL 确认 y/n/a 三态与提示次数、/clear 清史与历史接续、网关 401 转终结失败），脚本化 SSE 假 gateway + MAKE_CLI_CONFIG_DIR 隔离信任存储
 
+聊天与 code agent 的流式出站请求统一携带 `X-Make-Source: cli`，供 gateway 识别 CLI 来源。
+
 [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md

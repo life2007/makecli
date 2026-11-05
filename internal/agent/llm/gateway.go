@@ -2,11 +2,11 @@
  * [INPUT]: 依赖 bufio、bytes、context、encoding/json、errors、fmt、io、net/http、sort、strings、time、internal/agent/core
  * [OUTPUT]: 对外提供 GatewayProvider（llm.Provider 实现：OpenAI 兼容 SSE 指向 gateway /v1/chat/completions），
  *           经 StreamFnFromProvider 即得 loop 可用的 StreamFn
- * [POS]: internal/agent/llm 的唯一具体 Provider——keyless code agent 的模型面：平台 token 只开模型门，
+ * [POS]: 出站请求固定携带 X-Make-Source: cli；internal/agent/llm 的唯一具体 Provider——keyless code agent 的模型面：平台 token 只开模型门，
  *        model 填平台别名；请求编码/SSE 解码移植自 pigo internal/provider 的 providers.go/openai.go
  *        (MIT License, Copyright (c) 2026 smallnest)，剥离多模态 image 分支与看门狗/重试传输，
  *        按 internal/agent/client.go 的简洁风格重写（bufio 逐行 + data: 前缀 + OpenAI 风格错误体）
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package llm
@@ -83,6 +83,7 @@ func (p *GatewayProvider) StreamCompletion(ctx context.Context, req CompletionRe
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 	httpReq.Header.Set("X-Session-ID", p.sessionID)
+	httpReq.Header.Set("X-Make-Source", "cli")
 
 	response, err := p.http.Do(httpReq)
 	if err != nil {

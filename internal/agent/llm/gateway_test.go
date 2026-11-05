@@ -1,10 +1,10 @@
 /**
  * [INPUT]: 依赖 testing、httptest、encoding/json、strings；被测对象 gateway.go
- * [OUTPUT]: GatewayProvider 的单元测试——请求编码（system/messages/tool_calls/tool 结果/tools/stream 选项/头部）、
+ * [OUTPUT]: 验证 X-Make-Source: cli 出站标识；GatewayProvider 的单元测试——请求编码（system/messages/tool_calls/tool 结果/tools/stream 选项/头部）、
  *           SSE 解码（纯文本流、tool_calls 跨 chunk 分片、finish_reason 映射、usage）、
  *           错误语义（非 200 返回 error、流中坏 chunk 化为 StreamErrorEvent、[DONE] 缺失 EOF 收尾）
  * [POS]: internal/agent/llm 的行为契约测试，httptest 隔离网络；语义对齐 loop/faux_provider_test.go
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package llm
@@ -64,6 +64,9 @@ func TestGatewayTextStream(t *testing.T) {
 	var gotBody map[string]any
 	var gotHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Make-Source"); got != "cli" {
+			t.Errorf("X-Make-Source = %q, want cli", got)
+		}
 		gotHeader = r.Header.Clone()
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode request body: %v", err)

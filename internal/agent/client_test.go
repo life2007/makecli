@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 client.go；httptest 隔离网络
- * [OUTPUT]: 对外提供传输层回归——SSE 增量解析、鉴权头/会话头、OpenAI 错误体还原
+ * [OUTPUT]: 验证 X-Make-Source: cli 出站标识；对外提供传输层回归——SSE 增量解析、鉴权头/会话头、OpenAI 错误体还原
  * [POS]: internal/agent 的测试面（传输层）
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package agent
@@ -18,6 +18,9 @@ import (
 func TestChatStreamParsesDeltasAndHeaders(t *testing.T) {
 	var gotAuth, gotSession, gotBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Make-Source"); got != "cli" {
+			t.Errorf("X-Make-Source = %q, want cli", got)
+		}
 		gotAuth = r.Header.Get("Authorization")
 		gotSession = r.Header.Get("X-Session-ID")
 		buffer := make([]byte, 4096)

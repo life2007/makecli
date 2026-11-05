@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 context、encoding/json、io、net/http、net/http/httptest、strings、testing；包内 RegisterClient（白盒）
- * [OUTPUT]: 覆盖 RFC 7591 动态客户端注册 RegisterClient 的单元测试（请求体断言 / 成功解析 / 缺 client_id 错误）
+ * [OUTPUT]: 验证 X-Make-Source: cli 出站标识；覆盖 RFC 7591 动态客户端注册 RegisterClient 的单元测试（请求体断言 / 成功解析 / 缺 client_id 错误）
  * [POS]: internal/oauth 模块 registration.go 的配套测试，用 httptest 隔离网络
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package oauth
@@ -20,6 +20,9 @@ import (
 func TestRegisterClient(t *testing.T) {
 	var gotBody ClientRegistrationRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Make-Source"); got != "cli" {
+			t.Errorf("X-Make-Source = %q, want cli", got)
+		}
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &gotBody)
 		_, _ = w.Write([]byte(`{"client_id": "client-123"}`))

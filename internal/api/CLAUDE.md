@@ -66,4 +66,6 @@
 - `user.go`: 用户身份查询层，提供 UserTenant{ID,TenantName} / UserInfo{ID,Name,Tenant,Valid} 类型、GetUserInfo() 方法（GET /user/v1/info + X-Make-Target: MakeService.GetResource，无 body；网关前缀 /api/make 由 cmd 层补齐）；未登录业务码 notLoggedInCode=401 → ErrAuthFailed（探针也先命中 990300403），非 200 → 通用「API 错误」；Valid 表示当前用户与租户关系是否有效
 - `user_test.go`: 覆盖 GetUserInfo 的单元测试（成功解析/401 与 990300403 均返回 ErrAuthFailed/非 200 业务码报错/GET 不带 Content-Type/传输错误），用 httptest 隔离网络；测试数据已脱敏
 
+JSON、GET 和 OCR multipart 出站请求统一携带 `X-Make-Source: cli`，供服务端识别 CLI 来源；debug 同步展示。
+
 [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md

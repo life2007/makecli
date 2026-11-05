@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 context、encoding/json、fmt、io、net/http、strings
  * [OUTPUT]: 对外提供 ServerMetadata 类型、Discover 函数
- * [POS]: internal/oauth 的 OAuth 元数据发现（单跳），把 authorization-server metadata URL 解析为 authorization/token/registration 端点
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [POS]: 出站请求固定携带 X-Make-Source: cli；internal/oauth 的 OAuth 元数据发现（单跳），把 authorization-server metadata URL 解析为 authorization/token/registration 端点
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package oauth
@@ -35,6 +35,7 @@ func Discover(ctx context.Context, client *http.Client, metadataURL string) (*Se
 		return nil, fmt.Errorf("build discovery request: %w", err)
 	}
 
+	req.Header.Set("X-Make-Source", "cli")
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("perform discovery request: %w", err)

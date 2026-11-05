@@ -19,6 +19,8 @@ daemon_test.go / execenv_test.go / mention_test.go: 编排回归(httptest 假 ga
 adapter/: CLI 适配层,见其 CLAUDE.md
 launchd/: macOS 托管层(把前台形态固化成 LaunchAgent,登录自启 + 退出拉起),见其 CLAUDE.md
 
-[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+runtime 入册、心跳与执行生命周期的出站请求统一携带 `X-Make-Source: cli`，供 gateway 识别 CLI 来源。
+
+[PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
 
 当前原生设备适配器只消费已授权文本窗口；媒体或平台下发的业务 MCP 凭据未获得适配时明确拒绝，不能默默省略输入或借用宿主的其他业务账号。服务端托管 Runtime 的完整能力独立声明。

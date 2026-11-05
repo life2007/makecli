@@ -16,4 +16,6 @@
 - 动态端口（StartCallbackServer 绑 127.0.0.1:0）+ 每次注册新 client：两者互锁，消除固定端口与 client_id 持久化两个特殊情况
 - 从 deps/contract-cli/internal/oauth 移植，砍掉 bot 的 tenant_access_token、protected-resource 两跳发现、slog.Logger
 
-[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+元数据发现、客户端注册与 token 交换请求统一携带 `X-Make-Source: cli`，供授权服务识别 CLI 来源。
+
+[PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md

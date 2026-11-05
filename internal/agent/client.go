@@ -1,9 +1,9 @@
 /**
  * [INPUT]: 依赖 bufio、bytes、context、crypto/rand、encoding/json、fmt、io、net/http、strings、time
  * [OUTPUT]: 对外提供 Client（gateway /v1/chat/completions 的流式调用）、Message、NewSessionID、APIError
- * [POS]: internal/agent 的传输层——keyless 聊天：OpenAI 兼容 SSE 指向 gateway，
+ * [POS]: 出站请求固定携带 X-Make-Source: cli；internal/agent 的传输层——keyless 聊天：OpenAI 兼容 SSE 指向 gateway，
  *        设备端零厂商 key（agent-design/Design.md §8.2）；模型名是平台别名
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package agent
@@ -95,6 +95,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []Messag
 	request.Header.Set("Accept", "text/event-stream")
 	request.Header.Set("Authorization", "Bearer "+c.token)
 	request.Header.Set("X-Session-ID", c.sessionID)
+	request.Header.Set("X-Make-Source", "cli")
 
 	response, err := c.http.Do(request)
 	if err != nil {

@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 daemon.go/run.go/client.go/execenv.go 与 adapter 契约；net/http/httptest 模拟 gateway
- * [OUTPUT]: 授权窗口消费、事件批次确认与完成/取消/失败的执行编排回归
+ * [OUTPUT]: 验证 X-Make-Source: cli 出站标识；授权窗口消费、事件批次确认与完成/取消/失败的执行编排回归
  * [POS]: internal/daemon 的测试面——对 gateway 打桩测编排，不依赖真实 CLI 与网络
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package daemon
@@ -35,6 +35,9 @@ func newFakeGateway(t *testing.T) *fakeGateway {
 	t.Helper()
 	fake := &fakeGateway{bodies: map[string][]byte{}}
 	fake.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Make-Source"); got != "cli" {
+			t.Errorf("X-Make-Source = %q, want cli", got)
+		}
 		target := r.Header.Get(TargetHeader)
 		body := make([]byte, 0)
 		if r.Body != nil {
@@ -138,6 +141,9 @@ func TestNewSetupKeyEnrollmentHasNoBearer(t *testing.T) {
 	var gotAuthorization string
 	var gotRequest CreateRuntimeRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Make-Source"); got != "cli" {
+			t.Errorf("X-Make-Source = %q, want cli", got)
+		}
 		gotAuthorization = r.Header.Get("Authorization")
 		if r.URL.Path != PathPrefix+"/"+ResourceRuntime || r.Header.Get(TargetHeader) != TargetCreateResource {
 			t.Errorf("unexpected enrollment request: path=%s target=%s", r.URL.Path, r.Header.Get(TargetHeader))

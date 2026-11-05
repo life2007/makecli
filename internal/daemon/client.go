@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 bytes、context、encoding/json、fmt、io、net/http、time；协议类型来自 protocol.go
  * [OUTPUT]: gateway 设备面类型化调用、不可变的执行租户作用域与 APIError（信封错误还原）
- * [POS]: internal/daemon 的传输层——Bearer token 鉴权，POST + X-Make-Target + 信封解包；正确性建立在拉取式 claim 上，连接断开只影响延迟
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [POS]: 出站请求固定携带 X-Make-Source: cli；internal/daemon 的传输层——Bearer token 鉴权，POST + X-Make-Target + 信封解包；正确性建立在拉取式 claim 上，连接断开只影响延迟
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package daemon
@@ -82,6 +82,7 @@ func (c *Client) callWithHeaders(ctx context.Context, resource, target string, r
 	for name, values := range headers {
 		request.Header[name] = append([]string(nil), values...)
 	}
+	request.Header.Set("X-Make-Source", "cli")
 	response, err := c.http.Do(request)
 	if err != nil {
 		return fmt.Errorf("gateway unreachable: %w", err)

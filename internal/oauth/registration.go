@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 bytes、context、encoding/json、fmt、io、net/http、strings
  * [OUTPUT]: 对外提供 ClientRegistrationRequest / ClientRegistrationResponse 类型、RegisterClient 函数
- * [POS]: internal/oauth 的 RFC 7591 动态客户端注册，login 流程每次注册一个新 public client 拿 client_id
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [POS]: 出站请求固定携带 X-Make-Source: cli；internal/oauth 的 RFC 7591 动态客户端注册，login 流程每次注册一个新 public client 拿 client_id
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package oauth
@@ -47,6 +47,7 @@ func RegisterClient(ctx context.Context, client *http.Client, endpoint string, r
 		return nil, fmt.Errorf("build client registration request: %w", err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("X-Make-Source", "cli")
 
 	resp, err := client.Do(httpRequest)
 	if err != nil {

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 api 包内的 debugSink / debugRequest / newDebugSink（包内白盒），bytes、encoding/json、net/http、net/http/httptest、strings、testing
- * [OUTPUT]: 覆盖 text/JSON debug、properties.scope 筛选请求可见性与密钥值清理、损坏响应兜底、真实响应大小及 humanBytes
+ * [OUTPUT]: 覆盖 text/JSON debug（含 X-Make-Source: cli）、properties.scope 筛选请求可见性与密钥值清理、损坏响应兜底、真实响应大小及 humanBytes
  * [POS]: internal/api 模块 debug.go 的配套测试
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -41,6 +41,7 @@ func TestDebugText(t *testing.T) {
 		"\n  curl -X POST 'http://", "\n    -H 'Authorization: Bearer tok' \\\n",
 		"\n    -d '{\"key\":\"demo\"",
 		"← 200 OK  ", "  34 B\n",
+		"-H 'X-Make-Source: cli'",
 		"\n  {\n    \"code\": 200,\n    \"data\": {\n      \"key\": \"demo\"\n    }\n  }\n",
 	} {
 		if !strings.Contains(out, want) {
@@ -82,6 +83,9 @@ func TestDebugJSON(t *testing.T) {
 	}
 	if entry.Request.Headers["X-Make-Target"] != "MakeService.CreateResource" || entry.Request.Headers["Authorization"] != "Bearer tok" {
 		t.Errorf("request headers = %v", entry.Request.Headers)
+	}
+	if entry.Request.Headers["X-Make-Source"] != "cli" {
+		t.Errorf("source header = %q, want cli", entry.Request.Headers["X-Make-Source"])
 	}
 	if entry.Request.Body["key"] != "demo" {
 		t.Errorf("request body = %v", entry.Request.Body)

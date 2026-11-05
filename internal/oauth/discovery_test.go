@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 context、net/http、net/http/httptest、strings、testing；包内 Discover（白盒）
- * [OUTPUT]: 覆盖 Discover 的单元测试（成功解析端点 / 500 错误 / 缺 authz·token 端点）
+ * [OUTPUT]: 验证 X-Make-Source: cli 出站标识；覆盖 Discover 的单元测试（成功解析端点 / 500 错误 / 缺 authz·token 端点）
  * [POS]: internal/oauth 模块 discovery.go 的配套测试，用 httptest 隔离网络
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package oauth
@@ -16,7 +16,10 @@ import (
 )
 
 func TestDiscover(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Make-Source"); got != "cli" {
+			t.Errorf("X-Make-Source = %q, want cli", got)
+		}
 		_, _ = w.Write([]byte(`{
 			"issuer": "https://idp.example",
 			"authorization_endpoint": "https://idp.example/authorize",

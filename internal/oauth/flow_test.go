@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 context、net/http、net/http/httptest、net/url、strings、time、testing；包内 BuildAuthorizationURL / ExchangeAuthorizationCode / StartCallbackServer / Wait（白盒）
- * [OUTPUT]: 覆盖授权 URL query 构造、授权码换 token（成功+HTTP错误+Expiry）、回调服务器成功/state不匹配/超时三态的单元测试
+ * [OUTPUT]: 验证 X-Make-Source: cli 出站标识；覆盖授权 URL query 构造、授权码换 token（成功+HTTP错误+Expiry）、回调服务器成功/state不匹配/超时三态的单元测试
  * [POS]: internal/oauth 模块 flow.go 的配套测试，用 httptest + 真实 loopback server 隔离网络
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package oauth
@@ -60,6 +60,9 @@ func TestBuildAuthorizationURL(t *testing.T) {
 func TestExchangeAuthorizationCode(t *testing.T) {
 	var gotForm url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Make-Source"); got != "cli" {
+			t.Errorf("X-Make-Source = %q, want cli", got)
+		}
 		_ = r.ParseForm()
 		gotForm = r.PostForm
 		_, _ = w.Write([]byte(`{"access_token":"tok-abc","token_type":"Bearer","expires_in":3600}`))

@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 internal/api 包内的 Client.OCR / OCROptions（包内白盒），encoding/json、io、mime、mime/multipart、net/http、net/http/httptest、strings、testing
- * [OUTPUT]: 覆盖 Client.OCR 的单元测试（multipart 字段断言 / query 参数断言 / verify_vat 三态 / API 错误 / ErrAuthFailed 鉴权语义 / 网络错误）
+ * [OUTPUT]: 验证 X-Make-Source: cli 出站标识；覆盖 Client.OCR 的单元测试（multipart 字段断言 / query 参数断言 / verify_vat 三态 / API 错误 / ErrAuthFailed 鉴权语义 / 网络错误）
  * [POS]: internal/api 模块 integration.go 的配套测试，用 httptest 隔离网络
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package api
@@ -57,6 +57,9 @@ func TestClientOCR(t *testing.T) {
 			gotQuery   string
 		)
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("X-Make-Source"); got != "cli" {
+				t.Errorf("X-Make-Source = %q, want cli", got)
+			}
 			gotQuery = r.URL.RawQuery
 			gotFields, gotFile, gotContent = readMultipart(t, r)
 			_ = json.NewEncoder(w).Encode(map[string]any{

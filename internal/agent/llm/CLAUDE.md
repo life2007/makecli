@@ -8,4 +8,6 @@ loop 所依赖的 LLM 流式抽象 + 唯一具体 Provider（gateway 适配器�
 - `gateway.go`: GatewayProvider（llm.Provider 实现：OpenAI 兼容 SSE 指向 gateway /v1/chat/completions，头部同 client.go——Bearer token + X-Session-ID；StreamConfig.APIKey 非空时覆盖构造 token）、encodeGatewayRequest/Message/Tools（system+messages[assistant 展开 content+tool_calls、tool 结果→role:"tool"]+stream:true+include_usage+有工具才加 tools）、gatewayDecoder（choice.delta 累积 text/tool_calls 分片、finish_reason→StopReason 映射、usage 采集、[DONE]/EOF 均 finishDone 收尾不丢部分响应、坏 chunk/断流→StreamErrorEvent[ctx 取消为 aborted]）、decodeGatewayAPIError（OpenAI 风格错误体，同 client.go decodeAPIError 逻辑）
 - `gateway_test.go`: httptest SSE 桩覆盖——纯文本流（头部/请求体/usage/stop 映射）、tool_calls 跨 chunk 分片拼装、多轮历史与工具声明的线缆形状、401 错误体返回 Go error、[DONE] 缺失 EOF 收尾、流中坏 chunk 化为 StreamErrorEvent
 
-[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+GatewayProvider 的流式出站请求固定携带 `X-Make-Source: cli`，供 gateway 识别 CLI 来源。
+
+[PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md

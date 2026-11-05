@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 context、encoding/json、fmt、io、net、net/http、net/url、os/exec、runtime、strings、sync、time
  * [OUTPUT]: 对外提供 Token / AuthorizationRequest / TokenExchangeRequest / CallbackServer 类型、BuildAuthorizationURL / ExchangeAuthorizationCode / StartCallbackServer / OpenBrowser 函数
- * [POS]: internal/oauth 的登陆流程主原语——拼授权 URL、用 code 换 token；被 cmd/login.go 编排
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [POS]: 出站请求固定携带 X-Make-Source: cli；internal/oauth 的登陆流程主原语——拼授权 URL、用 code 换 token；被 cmd/login.go 编排
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package oauth
@@ -107,6 +107,7 @@ func ExchangeAuthorizationCode(ctx context.Context, client *http.Client, request
 		return nil, fmt.Errorf("build token request: %w", err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	httpRequest.Header.Set("X-Make-Source", "cli")
 
 	resp, err := client.Do(httpRequest)
 	if err != nil {

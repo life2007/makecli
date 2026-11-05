@@ -80,6 +80,8 @@ brew install makecli
 
 ## 文档入口与变更
 
+- 2026-11-05：所有面向 Make 服务的 HTTP 请求（API、OCR、Agent、daemon、OAuth）统一携带 `X-Make-Source: cli`，供服务端区分来源。
+
 - `app variable add <KEY> <VALUE>`：优先使用 --app，缺省从 apps/dsl/app.yaml 读取应用，scope 固定 runtime，--appRole 默认 beta、显式 prod 原样传给 API appRole=prod；通过 /secret/v1/variable 查询后创建或更新普通变量，拒绝覆盖密钥，仅保存配置，下次部署时生效。
 - `app variable put <KEY> <VALUE>`：沿用 add 的参数、校验和回执，只更新已存在的普通变量并保留说明；不存在或读取失败时不创建，下次部署生效。
 - `app variable list/delete`：沿用 runtime 与 --appRole beta|prod（默认 beta）；list 同时列出普通变量和密钥元数据，支持分页及 auto/table/json；delete 仅删除普通变量，输入 key 确认或 --yes，删除在下次部署生效。
