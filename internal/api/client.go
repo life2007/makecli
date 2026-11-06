@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 context、bytes、encoding/json、errors、fmt、io、net/http、net/url、strings、time，依赖 debug.go 的 debugSink，依赖 internal/trace 的 TraceID/Traceparent
- * [OUTPUT]: 对外提供 Client 类型、ErrNotFound / ErrAuthFailed 哨兵错误、UniqueConstraintError 类型化错误（409 且 data 带 constraint 的唯一性冲突，errors.As 判定；其余 409 是业务规则拒绝，服务端 msg 原样返回）、Option / WithDebug(on, DebugFormat) / WithHeaders / WithDryRun / WithAppRole 功能选项、New 构造函数、App（Role / PairAppKey / HostedEnv / KeyForEnv：prod/beta 配对知识收口，环境 → 承载 app key）、RoleForEnv（HostedEnv 逆映射：环境 → app 角色）、RoleProd / RoleBeta 常量 / Field / Entity / EntityProperties / UniqueConstraint / RelationEnd / RelationProperties / Relation / Schema 类型、CreateApp(key, name, properties) / UpdateApp(key, name, properties) / ListApps(page, size, filter) / DeleteApp(key) / AppDeletionStatus / GetAppDeletionStatus(Context) / GetApp(key) / GetAppContext(ctx, key) / CreateEntity(key, name, appKey, props) / ListEntities(appKey, page, size, filter) / GetEntity(appKey, key) / UpdateEntity(key, name, appKey, props) / DeleteEntity / CreateRelation(key, name, appKey, props) / UpdateRelation / ListRelations(appKey, ...) / GetRelation(appKey, key) / DeleteRelation / GetSchema(appKey) 方法。资源以 Key 为唯一标识符（英数下划线），Name 为用户可见展示名（支持中文）。Get* 方法在资源确实不存在时返回 ErrNotFound（可用 errors.Is 判定），其余错误（传输/非 not-found 业务码/解码）原样返回
- * [POS]: 出站请求固定携带 X-Make-Source: cli；internal/api 的核心，封装 Make Meta Service 的 HTTP 调用；requestContext 支持取消，旧 request 委托同一路径以保持兼容；新增可判别的 409 与删除状态响应错误类型
+ * [OUTPUT]: 对外提供 Client 类型、ErrNotFound / ErrAuthFailed 哨兵错误、UniqueConstraintError 类型化错误（409 且 data 带 constraint 的唯一性冲突，errors.As 判定；其余 409 是业务规则拒绝，服务端 msg 原样返回）、Client.ForApp（不可变应用作用域副本）/ Option / WithDebug(on, DebugFormat) / WithHeaders / WithDryRun / WithAppRole 功能选项、New 构造函数、App（Role / PairAppKey / HostedEnv / KeyForEnv：prod/beta 配对知识收口，环境 → 承载 app key）、RoleForEnv（HostedEnv 逆映射：环境 → app 角色）、RoleProd / RoleBeta 常量 / Field / Entity / EntityProperties / UniqueConstraint / RelationEnd / RelationProperties / Relation / Schema 类型、CreateApp(key, name, properties) / UpdateApp(key, name, properties) / ListApps(page, size, filter) / DeleteApp(key) / AppDeletionStatus / GetAppDeletionStatus(Context) / GetApp(key) / GetAppContext(ctx, key) / CreateEntity(key, name, appKey, props) / ListEntities(appKey, page, size, filter) / GetEntity(appKey, key) / UpdateEntity(key, name, appKey, props) / DeleteEntity / CreateRelation(key, name, appKey, props) / UpdateRelation / ListRelations(appKey, ...) / GetRelation(appKey, key) / DeleteRelation / GetSchema(appKey) 方法。资源以 Key 为唯一标识符（英数下划线），Name 为用户可见展示名（支持中文）。Get* 方法在资源确实不存在时返回 ErrNotFound（可用 errors.Is 判定），其余错误（传输/非 not-found 业务码/解码）原样返回
+ * [POS]: 已知 appKey 时通过 ForApp 副本携带 X-Make-App-Key；出站请求固定携带 X-Make-Source: cli；internal/api 的核心，封装 Make Meta Service 的 HTTP 调用；requestContext 支持取消，旧 request 委托同一路径以保持兼容；新增可判别的 409 与删除状态响应错误类型
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
@@ -106,6 +106,7 @@ type Client struct {
 	debug      *debugSink // nil 即关闭
 	dryRun     bool
 	headers    map[string]string
+	appKey     string // 当前调用的应用身份，仅用于请求头
 	appRole    string // 非空即每请求带 ?appRole=，选中 App 对里的哪一半（prod / beta）
 }
 
@@ -154,6 +155,13 @@ func New(baseURL, token string, opts ...Option) *Client {
 		opt(c)
 	}
 	return c
+}
+
+// ForApp 返回携带应用身份的副本，共享连接池与配置，不修改原客户端。
+func (c *Client) ForApp(appKey string) *Client {
+	scoped := *c
+	scoped.appKey = appKey
+	return &scoped
 }
 
 // ---------------------------------- 数据类型 ----------------------------------
@@ -232,6 +240,7 @@ func (c *Client) UpdateApp(key, name string, properties map[string]any) error {
 }
 
 func (c *Client) writeApp(action, key, name string, properties map[string]any) error {
+	c = c.ForApp(key)
 	body := map[string]any{
 		"key":        key,
 		"name":       name,
@@ -275,6 +284,7 @@ func (c *Client) ListApps(page, size int, filter string) ([]App, int, error) {
 // 删哪一半由 WithAppRole 决定（服务端按 ?appRole= 定位，beta 即配对 app）。
 // prod 有 beta 配对时服务端 409 拒删须先删 beta。
 func (c *Client) DeleteApp(key string) error {
+	c = c.ForApp(key)
 	body := map[string]any{
 		"key":  key,
 		"type": "Make.App",
@@ -306,6 +316,7 @@ func (c *Client) GetAppDeletionStatus(key string) (*AppDeletionStatus, error) {
 }
 
 func (c *Client) GetAppDeletionStatusContext(ctx context.Context, key string) (*AppDeletionStatus, error) {
+	c = c.ForApp(key)
 	var result struct {
 		Code    int                `json:"code"`
 		Message string             `json:"msg"`
@@ -403,6 +414,7 @@ const metaVersion = "1.0.0"
 // 仅在 action（Create/Update verb）、resType、path、properties，其余 body 结构完全一致。
 // 抽此一处收口，消除四个逐字重复的函数体（含 meta 版本号这类「配置当代码写 N 遍」的味道）。
 func (c *Client) writeResource(action, resType, path, key, name, appKey string, properties any) error {
+	c = c.ForApp(appKey)
 	body := map[string]any{
 		"key":        key,
 		"name":       name,
@@ -426,6 +438,7 @@ func (c *Client) CreateEntity(key, name, appKey string, props EntityProperties) 
 // filter 为可选的 CEL 表达式文本，空串时不发送 filter 字段
 // 返回 Entity 列表和服务端 total 数量
 func (c *Client) ListEntities(appKey string, page, size int, filter string) ([]Entity, int, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{
 		"appKey":     appKey,
 		"sort":       []map[string]any{{"fieldKey": "id", "order": "asc"}},
@@ -454,6 +467,7 @@ func (c *Client) ListEntities(appKey string, page, size int, filter string) ([]E
 // GetEntity 调用 MakeService.GetResource 获取指定 Entity 的详细信息（按 key 定位）
 // 资源不存在时返回 ErrNotFound；传输/非 not-found 业务错误原样返回
 func (c *Client) GetEntity(appKey, key string) (*Entity, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{"appKey": appKey, "key": key}
 	var result struct {
 		Code    int    `json:"code"`
@@ -477,6 +491,7 @@ func (c *Client) GetApp(key string) (*App, error) {
 
 // GetAppContext resolves app pairing under the caller's cancellation deadline.
 func (c *Client) GetAppContext(ctx context.Context, key string) (*App, error) {
+	c = c.ForApp(key)
 	reqBody := map[string]any{"key": key}
 	var result struct {
 		Code    int    `json:"code"`
@@ -500,6 +515,7 @@ func (c *Client) UpdateEntity(key, name, appKey string, props EntityProperties) 
 
 // DeleteEntity 调用 MakeService.DeleteResource 删除指定 Entity（按 key 定位）
 func (c *Client) DeleteEntity(key, appKey string) error {
+	c = c.ForApp(appKey)
 	body := map[string]any{
 		"key":    key,
 		"type":   "Make.Entity",
@@ -526,6 +542,7 @@ func (c *Client) UpdateRelation(key, name, appKey string, props RelationProperti
 // filter 为可选的 CEL 表达式文本，空串时不发送 filter 字段
 // 返回 Relation 列表和服务端 total 数量
 func (c *Client) ListRelations(appKey string, page, size int, filter string) ([]Relation, int, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{
 		"appKey":     appKey,
 		"sort":       []map[string]any{{"fieldKey": "id", "order": "asc"}},
@@ -554,6 +571,7 @@ func (c *Client) ListRelations(appKey string, page, size int, filter string) ([]
 // GetRelation 调用 MakeService.GetResource 获取指定 Relation 的详细信息（按 key 定位）
 // 资源不存在时返回 ErrNotFound；传输/非 not-found 业务错误原样返回
 func (c *Client) GetRelation(appKey, key string) (*Relation, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{"appKey": appKey, "key": key}
 	var result struct {
 		Code    int      `json:"code"`
@@ -593,6 +611,7 @@ func checkGetResult(code int, message string, exists bool) error {
 
 // DeleteRelation 调用 MakeService.DeleteResource 删除指定 Relation（按 key 定位）
 func (c *Client) DeleteRelation(key, appKey string) error {
+	c = c.ForApp(appKey)
 	body := map[string]any{
 		"key":    key,
 		"type":   "Make.Relation",
@@ -612,6 +631,7 @@ type Schema struct {
 
 // GetSchema 调用 MakeService.GetResource 获取指定 App 的聚合 Schema（按 appKey 定位）
 func (c *Client) GetSchema(appKey string) (*Schema, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{"appKey": appKey}
 	var result struct {
 		Code    int    `json:"code"`
@@ -687,6 +707,9 @@ func (c *Client) requestContext(ctx context.Context, method, target, path string
 		headers = append(headers, [2]string{k, v})
 	}
 	headers = append(headers, [2]string{"X-Make-Source", "cli"})
+	if c.appKey != "" {
+		headers = append(headers, [2]string{"X-Make-App-Key", c.appKey})
+	}
 
 	var payload io.Reader
 	if body != nil {

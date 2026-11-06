@@ -1,6 +1,6 @@
 /**
  * [INPUT]: logs deploy, app manifests, Git and HTTP fixtures
- * [OUTPUT]: Command defaults, app/SHA selection and initial tail/cursor contracts
+ * [OUTPUT]: Command defaults, app/SHA selection, initial tail/cursor and paired-app request header contracts
  * [POS]: Deployment-log command contract tests
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -115,6 +115,13 @@ func TestLogsDeployContractValidation(t *testing.T) {
 func TestLogsDeployContractProjectDefaults(t *testing.T) {
 	sha := ""
 	setupDeployLogsTest(t, func(w http.ResponseWriter, r *http.Request) {
+		wantApp := "project_beta"
+		if strings.HasSuffix(r.URL.Path, "/build") || strings.HasSuffix(r.URL.Path, "/app") {
+			wantApp = "project"
+		}
+		if got := r.Header.Get("X-Make-App-Key"); got != wantApp {
+			t.Errorf("%s: X-Make-App-Key = %q, want %q", r.URL.Path, got, wantApp)
+		}
 		if strings.HasSuffix(r.URL.Path, "/build") {
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

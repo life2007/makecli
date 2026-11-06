@@ -3,11 +3,11 @@
  * [OUTPUT]: 对外提供 PromoteRun / PromoteStep / PromoteStatus（含 Finished / Succeeded 终态判定）类型、
  *           PromoteStateSucceeded / Failed / Canceled / Terminated / TimedOut 状态常量、
  *           Client.PromoteApp(betaKey) / Client.GetPromoteStatus(betaKey, promoteID) 方法
- * [POS]: internal/api 的应用环境发布（make-console app-environment）调用层：POST /console/v1/app-environment/product，
+ * [POS]: 已知 appKey 时通过 ForApp 副本携带 X-Make-App-Key；internal/api 的应用环境发布（make-console app-environment）调用层：POST /console/v1/app-environment/product，
  *        X-Make-Target 区分动作——CreateResource 发起 beta → production 发布（服务端 Temporal 异步流程，
  *        固定 beta 最近一次成功部署的版本，回执 promoteId），StatusResource 按 promoteId 精确查本次进度。
  *        与 client.go 的 Meta 操作共用 Client 与 do 原语（网关前缀 /api/make 由 cmd 层补齐）；被 cmd/promote 消费
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package api
@@ -89,6 +89,7 @@ func appEnvironmentBody(betaKey string, properties map[string]any) map[string]an
 // 同一 beta 已有发布在跑时复用当前任务（回执即该任务的 promoteId），不会重复发布。
 // 业务码 404 返回 ErrNotFound（beta app 不存在），其余非 200 原样为「API 错误」。
 func (c *Client) PromoteApp(betaKey string) (*PromoteRun, error) {
+	c = c.ForApp(betaKey)
 	var result struct {
 		Code    int    `json:"code"`
 		Message string `json:"msg"`
@@ -115,6 +116,7 @@ func (c *Client) PromoteApp(betaKey string) (*PromoteRun, error) {
 // GetPromoteStatus 调用 MakeService.StatusResource 按 promoteId 查询本次发布进度。
 // 任务不存在（或响应无 state）返回 ErrNotFound；其余错误原样返回。
 func (c *Client) GetPromoteStatus(betaKey, promoteID string) (*PromoteStatus, error) {
+	c = c.ForApp(betaKey)
 	body := appEnvironmentBody(betaKey, map[string]any{"promoteId": promoteID})
 	var result struct {
 		Code    int    `json:"code"`

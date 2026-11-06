@@ -29,6 +29,7 @@
 - 设计意图：与 ErrNotFound / ErrAuthFailed 同为「api 报事实、cmd 管呈现」的分层边界
 
 ## 成员清单
+- `app_header_test.go`: 覆盖 App/Entity/Relation/Record/变量/密钥/Agent/仓库/发布/日志的应用身份头、appRole 原值透传、显式作用域覆盖及复用隔离。
 - `app_update_test.go`: UpdateApp 的 Meta 路由、requiredSecrets/空列表透传、业务错误和无效响应测试。
 - `variable.go`: Variable / VariableProperties 与 Get/List/Create/Update/DeleteVariable；POST /secret/v1/variable，Get/Delete 显式传普通变量类型，appRole 由客户端注入、服务端解析实际 AppKey，Get/List 保留实际 key 并拒绝空身份/混合应用，scope 显式传递；列表按 API 文档字段 properties.scope 筛选、保留分页与 meta、清除密钥值，debug 保留筛选请求及安全响应；DeleteResource 由服务端事务校验类型，密钥写入隐藏正文并清理错误中的值。
 - `secret.go`: GetSecret / ListSecrets / DeleteSecret 显式限定 Make.Secret；列表在服务端按 properties.scope/type 筛选且 debug 仅移除密钥值，删除携带完整命名空间并由事务校验类型；敏感操作克隆 debug sink 隐藏正文，错误明文替换保留哨兵链，不污染共享客户端。
@@ -65,6 +66,8 @@
 - `integration_test.go`: 覆盖 Client.OCR 的单元测试（默认请求/business_id+verify_vat 三态/query 参数序列化/API 错误/传输错误），用 httptest 隔离网络
 - `user.go`: 用户身份查询层，提供 UserTenant{ID,TenantName} / UserInfo{ID,Name,Tenant,Valid} 类型、GetUserInfo() 方法（GET /user/v1/info + X-Make-Target: MakeService.GetResource，无 body；网关前缀 /api/make 由 cmd 层补齐）；未登录业务码 notLoggedInCode=401 → ErrAuthFailed（探针也先命中 990300403），非 200 → 通用「API 错误」；Valid 表示当前用户与租户关系是否有效
 - `user_test.go`: 覆盖 GetUserInfo 的单元测试（成功解析/401 与 990300403 均返回 ErrAuthFailed/非 200 业务码报错/GET 不带 Content-Type/传输错误），用 httptest 隔离网络；测试数据已脱敏
+
+Client.ForApp 返回共享连接池的不可变副本；已知应用身份的资源方法自动设置 `X-Make-App-Key: <appKey>`，原值透传，不按 appRole 改写；无应用身份时省略。构建任务/日志、CEL 列表与 OCR 可由调用方显式提供作用域，debug 与实际请求头保持一致；app_header_test.go 验证有值/无值、跨应用覆盖、原客户端隔离及全部资源请求，debug_test.go 验证 text/JSON 头部可见性。
 
 JSON、GET 和 OCR multipart 出站请求统一携带 `X-Make-Source: cli`，供服务端识别 CLI 来源；debug 同步展示。
 

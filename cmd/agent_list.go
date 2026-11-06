@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 cmd/client、cmd/agent 的 validAgentAppKey、cmd/app_list 的 celString、cmd/output、internal/api，fmt、os、github.com/olekukonko/tablewriter、github.com/spf13/cobra
  * [OUTPUT]: 对外提供 newAgentListCmd；包内 runAgentList
- * [POS]: cmd/agent 的配置列表子命令，--app 经 CEL 等值筛选限定实际应用，分页与 auto/table/json 输出沿用 app list
+ * [POS]: 已知应用身份通过 Client.ForApp 传入请求头；cmd/agent 的配置列表子命令，--app 经 CEL 等值筛选限定实际应用，分页与 auto/table/json 输出沿用 app list
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
@@ -49,7 +49,7 @@ func runAgentList(appKey string, page, size int, output string) error {
 	if err != nil {
 		return err
 	}
-	agents, total, err := client.ListAgents(page, size, "appKey == "+celString(appKey))
+	agents, total, err := client.ForApp(appKey).ListAgents(page, size, "appKey == "+celString(appKey))
 	if err != nil {
 		return err
 	}

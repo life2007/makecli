@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 api 包内的 debugSink / debugRequest / newDebugSink（包内白盒），bytes、encoding/json、net/http、net/http/httptest、strings、testing
- * [OUTPUT]: 覆盖 text/JSON debug（含 X-Make-Source: cli）、properties.scope 筛选请求可见性与密钥值清理、损坏响应兜底、真实响应大小及 humanBytes
+ * [OUTPUT]: 覆盖 text/JSON debug（含 X-Make-Source: cli 与 X-Make-App-Key）、properties.scope 筛选请求可见性与密钥值清理、损坏响应兜底、真实响应大小及 humanBytes
  * [POS]: internal/api 模块 debug.go 的配套测试
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -42,6 +42,7 @@ func TestDebugText(t *testing.T) {
 		"\n    -d '{\"key\":\"demo\"",
 		"← 200 OK  ", "  34 B\n",
 		"-H 'X-Make-Source: cli'",
+		"-H 'X-Make-App-Key: demo'",
 		"\n  {\n    \"code\": 200,\n    \"data\": {\n      \"key\": \"demo\"\n    }\n  }\n",
 	} {
 		if !strings.Contains(out, want) {
@@ -86,6 +87,9 @@ func TestDebugJSON(t *testing.T) {
 	}
 	if entry.Request.Headers["X-Make-Source"] != "cli" {
 		t.Errorf("source header = %q, want cli", entry.Request.Headers["X-Make-Source"])
+	}
+	if entry.Request.Headers["X-Make-App-Key"] != "demo" {
+		t.Errorf("app header = %q, want demo", entry.Request.Headers["X-Make-App-Key"])
 	}
 	if entry.Request.Body["key"] != "demo" {
 		t.Errorf("request body = %v", entry.Request.Body)

@@ -2,10 +2,10 @@
  * [INPUT]: 依赖 client.go 的 Client.do / notFoundCode / ErrNotFound、fmt、net/url，依赖 internal/build 的 Version
  * [OUTPUT]: 对外提供 CodeRepo / CodeRepoEnv / CodeRepoMeta / CodeRepoProperties / CodeRepoResource（含 AppRole）类型、
  *           Client.CreateRepository(appKey) 方法、CodeRepoResource.CloneURL() 收口方法（仓库按 app 划分，环境 → app 由 App.KeyForEnv 定位）
- * [POS]: internal/api 的代码仓库服务（make-repo）调用层，POST /code/v1/repository?version=<cli 版本>，
+ * [POS]: 已知 appKey 时通过 ForApp 副本携带 X-Make-App-Key；internal/api 的代码仓库服务（make-repo）调用层，POST /code/v1/repository?version=<cli 版本>，
  *        经 X-Make-Target 区分动作；与 client.go 的 Meta 操作共用 Client 与 do 原语。
  *        version 查询参数是服务端强制升级门禁的依据（缺失即拒绝并提示 makecli update）
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package api
@@ -79,6 +79,7 @@ func (r *CodeRepoResource) CloneURL() string {
 // Organization / Repository 不存在则创建，存在则复用。成功即代表仓库已就绪，可以 git push。
 // 请求携带 version 查询参数（CLI 版本），服务端据此做强制升级判定。
 func (c *Client) CreateRepository(appKey string) (*CodeRepoResource, error) {
+	c = c.ForApp(appKey)
 	body := map[string]any{
 		"type":   codeRepoType,
 		"appKey": appKey,

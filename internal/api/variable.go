@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 client.go 的 Client.do / Client.post / checkGetResult / authFailedErr / metaVersion、secret.go 的密钥脱敏，encoding/json、fmt
  * [OUTPUT]: 对外提供 Variable / VariableProperties 类型及 Client.GetVariable / ListVariables / CreateVariable / UpdateVariable / DeleteVariable；包内 getVariable 按类型查询
- * [POS]: internal/api 的配置 CRUD-L，appRole 由服务端解析实际 AppKey；Get/List 保留真实身份并校验 key/scope，列表按 properties.scope 筛选
+ * [POS]: 已知 appKey 时通过 ForApp 副本携带 X-Make-App-Key；internal/api 的配置 CRUD-L，appRole 由服务端解析实际 AppKey；Get/List 保留真实身份并校验 key/scope，列表按 properties.scope 筛选
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
@@ -35,6 +35,7 @@ func (c *Client) GetVariable(key, appKey, scope string) (*Variable, error) {
 }
 
 func (c *Client) getVariable(key, appKey, scope, resourceType string) (*Variable, error) {
+	c = c.ForApp(appKey)
 	body := map[string]any{
 		"key": key, "type": resourceType, "appKey": appKey,
 		"properties": map[string]string{"scope": scope},
@@ -81,6 +82,7 @@ func (c *Client) ListVariables(appKey, scope string, page, size int) ([]Variable
 }
 
 func (c *Client) listVariables(appKey, scope, resourceType string, page, size int) ([]Variable, int, error) {
+	c = c.ForApp(appKey)
 	filter := "properties.scope == '" + scope + "'"
 	if resourceType != "" {
 		filter += " && type == '" + resourceType + "'"
@@ -155,6 +157,7 @@ func (c *Client) DeleteVariable(key, appKey, scope string) error {
 }
 
 func (c *Client) deleteVariable(key, appKey, scope, resourceType string) error {
+	c = c.ForApp(appKey)
 	body := map[string]any{
 		"key": key, "type": resourceType, "appKey": appKey,
 		"properties": map[string]string{"scope": scope},
@@ -163,6 +166,7 @@ func (c *Client) deleteVariable(key, appKey, scope, resourceType string) error {
 }
 
 func (c *Client) writeVariable(target string, variable Variable) error {
+	c = c.ForApp(variable.AppKey)
 	body := map[string]any{
 		"key": variable.Key, "type": variable.Type, "appKey": variable.AppKey,
 		"meta": map[string]string{"version": metaVersion}, "properties": variable.Properties,

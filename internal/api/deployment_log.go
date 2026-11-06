@@ -1,8 +1,8 @@
 /**
  * [INPUT]: Shared HTTP boundary, resolved task identity and event sequence cursor
  * [OUTPUT]: DeploymentLogChunk and cancellable deployment process event reads
- * [POS]: Deployment events API adapter; distinct from build byte cursors and runtime logs
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [POS]: 已知 appKey 时通过 ForApp 副本携带 X-Make-App-Key；Deployment events API adapter; distinct from build byte cursors and runtime logs
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 package api
 
@@ -23,6 +23,7 @@ type DeploymentLogChunk struct {
 // GetDeploymentLog reads events for the selected task's actual hosting app.
 // Authentication, safe request diagnostics and tracing use the shared HTTP boundary.
 func (c *Client) GetDeploymentLog(ctx context.Context, task BuildTask, cursor uint64) (*DeploymentLogChunk, error) {
+	c = c.ForApp(task.AppKey)
 	tenantID := strconv.FormatInt(task.OrgID, 10)
 	if task.OrgID <= 0 {
 		tenantID = c.headers["X-Tenant-ID"]

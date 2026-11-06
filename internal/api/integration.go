@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 bytes、encoding/json、fmt、io、mime/multipart、net/http、net/url、path/filepath、strconv，依赖 debug.go 的 debugSink / debugRequest，依赖 internal/trace 的 TraceID/Traceparent
  * [OUTPUT]: 对外提供 OCROptions 类型、Client.OCR(filename, reader, opts) 方法，返回 OCR 服务 data 字段（map[string]any，已递归剥除 position 坐标字段）
- * [POS]: 出站请求固定携带 X-Make-Source: cli；internal/api 的 integration 子层，封装 Make Integration 服务（/integration/v1/ocr）的 HTTP 调用，与 client.go (Meta/Data) 平级
+ * [POS]: ForApp 非空时同步携带 X-Make-App-Key；出站请求固定携带 X-Make-Source: cli；internal/api 的 integration 子层，封装 Make Integration 服务（/integration/v1/ocr）的 HTTP 调用，与 client.go (Meta/Data) 平级
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
@@ -124,6 +124,9 @@ func (c *Client) OCR(filename string, content io.Reader, opts OCROptions) (map[s
 		headers = append(headers, [2]string{k, v})
 	}
 	headers = append(headers, [2]string{"X-Make-Source", "cli"})
+	if c.appKey != "" {
+		headers = append(headers, [2]string{"X-Make-App-Key", c.appKey})
+	}
 
 	req, err := http.NewRequest(http.MethodPost, endpoint, &buf)
 	if err != nil {

@@ -1,6 +1,6 @@
 /**
  * [INPUT]: Deployment logs command, httptest and local go-git test fixtures
- * [OUTPUT]: Task selection, cursor streaming, output, cancellation and read-only behavior tests
+ * [OUTPUT]: 验证已知 appKey 传入 X-Make-App-Key；Task selection, cursor streaming, output, cancellation and read-only behavior tests
  * [POS]: logs deploy command integration tests; no real deployments
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -52,6 +52,9 @@ func executeDeployLogsTest(ctx context.Context, args ...string) (string, string,
 func TestLogsDeploySHASnapshot(t *testing.T) {
 	calls := 0
 	setupDeployLogsTest(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Make-App-Key"); got != "test_app" {
+			t.Errorf("X-Make-App-Key = %q, want test_app", got)
+		}
 		if strings.HasSuffix(r.URL.Path, "/build") {
 			_, _ = w.Write([]byte(`{"code":200,"data":{"id":42,"appKey":"test_app"}}`))
 			return

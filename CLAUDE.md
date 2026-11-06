@@ -80,6 +80,8 @@ brew install makecli
 
 ## 文档入口与变更
 
+- 2026-11-05：涉及应用的请求携带 `X-Make-App-Key: <appKey>`；资源方法从显式参数取值，构建/日志与 Agent 列表由编排层传递作用域，无应用身份时省略。
+
 - 2026-11-05：所有面向 Make 服务的 HTTP 请求（API、OCR、Agent、daemon、OAuth）统一携带 `X-Make-Source: cli`，供服务端区分来源。
 
 - `app variable add <KEY> <VALUE>`：优先使用 --app，缺省从 apps/dsl/app.yaml 读取应用，scope 固定 runtime，--appRole 默认 beta、显式 prod 原样传给 API appRole=prod；通过 /secret/v1/variable 查询后创建或更新普通变量，拒绝覆盖密钥，仅保存配置，下次部署时生效。

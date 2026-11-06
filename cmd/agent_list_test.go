@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 agent_list.go、agentCmd、agent_create_test.go 的隔离命令 helper、captureStdout，encoding/json、net/http、net/http/httptest、strings、testing
- * [OUTPUT]: 覆盖 Agent 列表应用范围、分页、概要输出、空列表及失败无输出
+ * [OUTPUT]: 验证已知 appKey 传入 X-Make-App-Key；覆盖 Agent 列表应用范围、分页、概要输出、空列表及失败无输出
  * [POS]: cmd/agent list 的端到端命令测试，httptest 隔离真实后端
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -26,6 +26,9 @@ func TestAgentListRemote(t *testing.T) {
 			calls := 0
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
+				if got := r.Header.Get("X-Make-App-Key"); got != tc.appKey {
+					t.Errorf("X-Make-App-Key = %q, want %q", got, tc.appKey)
+				}
 				if r.Method != http.MethodPost || r.URL.Path != "/api/make/agent/v1/agent" || r.Header.Get("X-Make-Target") != "MakeService.ListResources" {
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL)
 				}

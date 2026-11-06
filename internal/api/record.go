@@ -1,8 +1,8 @@
 /**
  * [INPUT]: 依赖 encoding/json、fmt，依赖同包 Client.do / Client.post 方法、writeStatusErr（非 200 翻译，含 409 唯一性冲突，收口于 client.go）
  * [OUTPUT]: 对外提供 DeleteRecordResult / SortField / ListRecordOpts / GroupField / AggregateField / AggregateOpts 类型、CreateRecord / GetRecord / UpdateRecord / UpdateRecordsBatch / DeleteRecords / ListRecords / AggregateRecords 方法（写方法违反唯一性约束时返回 UniqueConstraintError）
- * [POS]: internal/api 的 Data Service 层，封装 Record CRUD 与聚合统计（/data/v1/aggregate，声明式 GROUP BY），与 client.go 的 Meta Service 层平级；ListRecords / AggregateRecords 共用 listPage 解码分页响应
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [POS]: 已知 appKey 时通过 ForApp 副本携带 X-Make-App-Key；internal/api 的 Data Service 层，封装 Record CRUD 与聚合统计（/data/v1/aggregate，声明式 GROUP BY），与 client.go 的 Meta Service 层平级；ListRecords / AggregateRecords 共用 listPage 解码分页响应
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package api
@@ -72,6 +72,7 @@ type AggregateOpts struct {
 // CreateRecord 调用 MakeService.CreateResource 创建一条记录
 // 返回新创建记录的 recordID
 func (c *Client) CreateRecord(appKey, entityKey string, data map[string]any) (string, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{
 		"appKey":    appKey,
 		"entityKey": entityKey,
@@ -100,6 +101,7 @@ func (c *Client) CreateRecord(appKey, entityKey string, data map[string]any) (st
 // GetRecord 调用 MakeService.GetResource 获取单条记录
 // 返回记录的动态字段 map
 func (c *Client) GetRecord(appKey, entityKey, recordID string) (map[string]any, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{
 		"appKey":    appKey,
 		"entityKey": entityKey,
@@ -121,6 +123,7 @@ func (c *Client) GetRecord(appKey, entityKey, recordID string) (map[string]any, 
 
 // UpdateRecord 调用 MakeService.UpdateResource 更新单条记录
 func (c *Client) UpdateRecord(appKey, entityKey, recordID string, data map[string]any) error {
+	c = c.ForApp(appKey)
 	body := map[string]any{
 		"appKey":    appKey,
 		"entityKey": entityKey,
@@ -137,6 +140,7 @@ func (c *Client) UpdateRecord(appKey, entityKey, recordID string, data map[strin
 // 用户无需感知两个不同的 API 端点。
 // data 的 key 应该是 fieldKey（英文标识符）。
 func (c *Client) UpdateRecordsBatch(appKey, entityKey string, recordIDs []string, data map[string]any) error {
+	c = c.ForApp(appKey)
 	body := map[string]any{
 		"appKey":       appKey,
 		"entityKey":    entityKey,
@@ -149,6 +153,7 @@ func (c *Client) UpdateRecordsBatch(appKey, entityKey string, recordIDs []string
 // DeleteRecords 调用 MakeService.DeleteResource 批量删除记录
 // 返回每条记录的删除结果
 func (c *Client) DeleteRecords(appKey, entityKey string, recordIDs []string) ([]DeleteRecordResult, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{
 		"appKey":       appKey,
 		"entityKey":    entityKey,
@@ -172,6 +177,7 @@ func (c *Client) DeleteRecords(appKey, entityKey string, recordIDs []string) ([]
 // 返回记录列表和服务端 total 数量
 // fields/sort 字段名使用 fieldKey（英文标识符）
 func (c *Client) ListRecords(appKey, entityKey string, opts ListRecordOpts) ([]map[string]any, int, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{
 		"appKey":     appKey,
 		"entityKey":  entityKey,
@@ -192,6 +198,7 @@ func (c *Client) ListRecords(appKey, entityKey string, opts ListRecordOpts) ([]m
 // AggregateRecords 调用 MakeService.ListResources 对单个 Entity 做服务端聚合统计（POST /data/v1/aggregate）
 // 返回分组行列表（维度列为 {value,label}，指标列为裸数值）和分组总行数
 func (c *Client) AggregateRecords(appKey, entityKey string, opts AggregateOpts) ([]map[string]any, int, error) {
+	c = c.ForApp(appKey)
 	reqBody := map[string]any{
 		"appKey":     appKey,
 		"entityKey":  entityKey,

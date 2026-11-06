@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 client.go 的 Client.do / writeStatusErr / authFailedErr、record.go 的 expression，encoding/json、fmt
  * [OUTPUT]: 对外提供 CreateAgentRequest / CreateAgentPlugin / AgentSummary / Agent / AgentPlugin 类型和 Client.CreateAgent / ListAgents / DeleteAgent / GetAgent / SetAgentStatus 方法
- * [POS]: internal/api 的 Agent 配置创建、列表、详情、删除与启停层，调用 /agent/v1/agent，appKey 表达实际应用归属；与本地聊天 internal/agent 无依赖
+ * [POS]: 已知 appKey 时通过 ForApp 副本携带 X-Make-App-Key；internal/api 的 Agent 配置创建、列表、详情、删除与启停层，调用 /agent/v1/agent，appKey 表达实际应用归属；与本地聊天 internal/agent 无依赖
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
@@ -27,6 +27,7 @@ type CreateAgentRequest struct {
 
 // GetAgent 先检查状态再解码配置；404 与空 key 收敛为 ErrNotFound。
 func (c *Client) GetAgent(key, appKey string) (*Agent, error) {
+	c = c.ForApp(appKey)
 	var result struct {
 		Code    int             `json:"code"`
 		Message string          `json:"msg"`
@@ -93,6 +94,7 @@ type AgentPlugin struct {
 
 // CreateAgent 先判业务状态，再解码成功数据，避免错误详情误解为 Agent。
 func (c *Client) CreateAgent(req CreateAgentRequest) (*Agent, error) {
+	c = c.ForApp(req.AppKey)
 	var result struct {
 		Code    int             `json:"code"`
 		Message string          `json:"msg"`
@@ -152,6 +154,7 @@ func (c *Client) ListAgents(page, size int, filter string) ([]AgentSummary, int,
 
 // DeleteAgent 以实际应用和 key 定位，服务端软删除并保留历史。
 func (c *Client) DeleteAgent(key, appKey string) error {
+	c = c.ForApp(appKey)
 	var result struct {
 		Code    int             `json:"code"`
 		Message string          `json:"msg"`
@@ -172,6 +175,7 @@ func (c *Client) DeleteAgent(key, appKey string) error {
 
 // SetAgentStatus 只提交 status，不发送其他配置字段；返回保存后的完整 Agent。
 func (c *Client) SetAgentStatus(key, appKey, status string) (*Agent, error) {
+	c = c.ForApp(appKey)
 	var result struct {
 		Code    int             `json:"code"`
 		Message string          `json:"msg"`

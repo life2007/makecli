@@ -1,9 +1,9 @@
 /**
  * [INPUT]: 依赖 client.go 的 Client.do / notFoundCode / ErrNotFound、fmt
  * [OUTPUT]: 对外提供 EnvBeta / EnvProduction 用户面环境常量与 ServerEnvKey / DisplayEnv 词汇翻译（beta ⇄ 服务端 preview）、 EnvDeployment / DeploymentOverview 类型（含 Env(name) 环境选择器）、Client.GetDeploymentOverview(appKey) 方法
- * [POS]: internal/api 的部署服务（make-deployment）调用层，POST /deployment/v1/deployment/overview，
+ * [POS]: 已知 appKey 时通过 ForApp 副本携带 X-Make-App-Key；internal/api 的部署服务（make-deployment）调用层，POST /deployment/v1/deployment/overview，
  *        与 client.go 的 Meta 操作共用 Client 与 do 原语；被 cmd/app_info 与 cmd/deploy（成功后带出环境 URL）消费
- * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
 package api
@@ -77,6 +77,7 @@ func (o *DeploymentOverview) Env(name string) *EnvDeployment {
 // 业务码 404 表示该 App 从未部署，返回 ErrNotFound（调用方视为合法状态而非失败）；
 // 其余非 200 业务码与传输/解码错误原样上抛。
 func (c *Client) GetDeploymentOverview(appKey string) (*DeploymentOverview, error) {
+	c = c.ForApp(appKey)
 	body := map[string]any{"appKey": appKey}
 	var result struct {
 		Code    int                `json:"code"`

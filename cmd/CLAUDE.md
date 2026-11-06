@@ -245,3 +245,7 @@ apply.go → api.UpdateApp（配对应用契约）/ saveAppVariable（Beta runti
 - 2026-10-20：app secret 新增 put/list/delete；put 仅更新、list 服务端筛选密钥、delete 按类型确认删除，与 variable 共用命令流程和脱敏边界。
 
 - 2026-10-20：apply 支持 App 创建或更新；vars 从 Meta properties 分离并同步 Beta runtime，requiredSecrets 只保存名称契约，变量删除不隐式同步。
+
+- 2026-11-05：Agent 列表、部署状态/等待与日志编排将已知 appKey 通过 Client.ForApp 传给请求层；查到任务后日志请求使用任务的实际 AppKey，应用身份显式传递，不解析 CEL。
+
+- Agent 列表与日志测试覆盖 X-Make-App-Key 的真实 HTTP 请求头断言；logs_deploy_contract_test.go 验证配对应用查询使用输入 key、后续日志使用任务实际 key。

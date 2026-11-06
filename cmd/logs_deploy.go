@@ -1,7 +1,7 @@
 /**
  * [INPUT]: Build and deployment event APIs, app manifest, Git HEAD, beta/prod app roles and CLI output helpers
  * [OUTPUT]: logs deploy with initial tail, build-first zero-tail snapshots and bounded follow
- * [POS]: Read-only deployment log command; process worker owns stdout, stderr and final error output
+ * [POS]: 已知应用身份通过 Client.ForApp 传入请求头；Read-only deployment log command; process worker owns stdout, stderr and final error output
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 package cmd
@@ -222,12 +222,14 @@ type buildLogView struct {
 // readDeployLogs is the I/O boundary. It logs selection/wait/completion to stderr;
 // errors propagate to the standard CLI error reporter without logging secrets.
 func readDeployLogs(ctx context.Context, client *api.Client, opts logsDeployOptions, stdout, stderr io.Writer) error {
+	client = client.ForApp(opts.appKey)
 	_, _ = fmt.Fprintf(stderr, "Reading %s %s logs...\n", opts.appRole, opts.stage)
 	task, err := resolveBuildLogTask(ctx, client, opts, stderr)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "Build log task lookup failed.")
 		return err
 	}
+	client = client.ForApp(task.AppKey)
 	_, _ = fmt.Fprintf(stderr, "Build: #%d\n", task.ID)
 	if opts.stage != "build" {
 		return readDeploymentStages(ctx, client, *task, opts, stdout, stderr)
