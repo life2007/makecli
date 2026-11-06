@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.22] - 2026-11-06
+
+### Features
+
+- **http**: Include app identity in application requests
+- **http**: Identify CLI requests with X-Make-Source header
+- **app**: Wait for asynchronous deletion in CLI (#50)
+- **app**: Manage runtime secrets and variables
+- **app**: Support runtime variables and declarative config
+
+### Bug Fixes
+
+- **logs**: Preserve deployment events during zero-tail follow (#51)
+- **app**: Resolve config targets and align app roles
+
+### Maintenance
+
+- **skills**: Bump make-platform-skills to 37cbbb6
+- **skills**: Bump make-platform-skills to 6d4acf5
+- **skills**: Bump make-platform-skills to 8e803dd
+
 ## [v0.5.21] - 2026-10-20
 
 ### Features
@@ -387,7 +408,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Releases before v0.3.0 (v0.1.x–v0.2.x) predate this changelog. See the
 [GitHub releases](https://github.com/qfeius/makecli/releases) for their notes.
 
-[Unreleased]: https://github.com/qfeius/makecli/compare/v0.5.21...HEAD
+[Unreleased]: https://github.com/qfeius/makecli/compare/v0.5.22...HEAD
+[v0.5.22]: https://github.com/qfeius/makecli/releases/tag/v0.5.22
 [v0.5.21]: https://github.com/qfeius/makecli/releases/tag/v0.5.21
 [v0.5.20]: https://github.com/qfeius/makecli/releases/tag/v0.5.20
 [v0.5.16]: https://github.com/qfeius/makecli/releases/tag/v0.5.16
